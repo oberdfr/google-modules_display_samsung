@@ -1150,6 +1150,7 @@ static const struct exynos_panel_mode s6e3hc3_modes[] = {
 			.vsync_end = 3120 + 12 + 4, // add vsa
 			.vtotal = 3120 + 12 + 4 + 14, // add vbp
 			.flags = 0,
+			.type = DRM_MODE_TYPE_PREFERRED,
 			.width_mm = 71,
 			.height_mm = 155,
 		},
