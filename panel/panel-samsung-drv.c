@@ -714,7 +714,11 @@ static int exynos_panel_parse_dt(struct exynos_panel *ctx)
 	if (ret)
 		goto err;
 
-	ret = exynos_panel_parse_regulators(ctx);
+	if (ctx->desc && ctx->desc->exynos_panel_func &&
+				ctx->desc->exynos_panel_func->parse_regulators)
+		ret = ctx->desc->exynos_panel_func->parse_regulators(ctx);
+	else
+		ret = exynos_panel_parse_regulators(ctx);
 	if (ret)
 		goto err;
 

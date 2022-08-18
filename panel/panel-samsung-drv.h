@@ -493,6 +493,13 @@ struct exynos_panel_funcs {
 	 * normal mode.
 	 */
 	void (*run_normal_mode_work)(struct exynos_panel *exynos_panel);
+
+	/**
+	 * @parse_regulators
+	 *
+	 * Parse regulators for panel.
+	 */
+	int (*parse_regulators)(struct exynos_panel *ctx);
 };
 
 /**
