@@ -646,6 +646,7 @@ struct exynos_panel_desc {
 	u32 min_luminance;
 	u32 max_brightness;
 	u32 min_brightness;
+	u32 lower_min_brightness; /* extreme low brightness */
 	u32 dft_brightness; /* default brightness */
 	u32 rr_switch_duration;
 	/* extra frame is needed to apply brightness change if it's not at next VSYNC */
