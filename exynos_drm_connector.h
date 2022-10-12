@@ -93,6 +93,8 @@ struct exynos_display_dsc {
 	unsigned int slice_height;
 
 	const struct drm_dsc_config *cfg;
+
+	bool is_scrv4;
 };
 
 struct exynos_display_partial {

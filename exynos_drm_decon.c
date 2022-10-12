@@ -394,6 +394,7 @@ update_dsi_config_from_exynos_connector(struct decon_config *config,
 		config->dsc.slice_width =
 			DIV_ROUND_UP(config->image_width, config->dsc.slice_count);
 		config->dsc.cfg = exynos_mode->dsc.cfg;
+		config->dsc.is_scrv4 = exynos_mode->dsc.is_scrv4;
 	}
 
 	is_vid_mode = (exynos_mode->mode_flags & MIPI_DSI_MODE_VIDEO) != 0;
