@@ -25,6 +25,7 @@
 #include <uapi/linux/videodev2_exynos_media.h>
 #include <linux/dma-buf.h>
 #include <linux/pm_runtime.h>
+#include <linux/of_reserved_mem.h>
 
 #include <trace/dpu_trace.h>
 
@@ -101,6 +102,14 @@ static size_t get_plane_size(const struct drm_mode_fb_cmd2 *mode_cmd, u32 idx,
 		else if (idx == 1)
 			size = UV_SIZE_SBWC(mode_cmd->width, mode_cmd->height,
 					is_10bpc);
+	} else if (has_all_bits(DRM_FORMAT_MOD_ARM_AFBC(0),
+				mode_cmd->modifier[idx]) &&
+				IS_YUV(dpu_find_fmt_info(mode_cmd->pixel_format))) {
+		is_10bpc = IS_10BPC(dpu_find_fmt_info(mode_cmd->pixel_format));
+		if (is_10bpc)
+			size = AFBC_10B_Y_SIZE(mode_cmd->width, mode_cmd->height);
+		else
+			size = AFBC_8B_Y_SIZE(mode_cmd->width, mode_cmd->height);
 	} else {
 		height = (idx == 0) ? mode_cmd->height :
 			DIV_ROUND_UP(mode_cmd->height, info->vsub);
@@ -227,8 +236,8 @@ void *exynos_drm_fb_to_vaddr(const struct drm_framebuffer *fb)
 }
 
 static void plane_state_to_win_config(struct dpu_bts_win_config *win_config,
-				      const struct drm_plane_state *plane_state,
-				      const u32 dpp_id)
+					const struct drm_plane_state *plane_state,
+					const struct dpp_device *dpp)
 {
 	const struct drm_framebuffer *fb = plane_state->fb;
 	unsigned int simplified_rot;
@@ -256,7 +265,7 @@ static void plane_state_to_win_config(struct dpu_bts_win_config *win_config,
 		win_config->state = DPU_WIN_STATE_BUFFER;
 
 	win_config->format = fb->format->format;
-	win_config->dpp_id = dpp_id;
+	win_config->dpp_id = dpp->id;
 	win_config->zpos = plane_state->normalized_zpos;
 
 	win_config->comp_src = 0;
@@ -273,16 +282,18 @@ static void plane_state_to_win_config(struct dpu_bts_win_config *win_config,
 
 	win_config->is_secure = (fb->modifier & DRM_FORMAT_MOD_PROTECTION) != 0;
 
+	win_config->hdr_en = dpp_need_enable_hdr(dpp);
+
 	DRM_DEBUG("src[%d %d %d %d], dst[%d %d %d %d]\n",
 			win_config->src_x, win_config->src_y,
 			win_config->src_w, win_config->src_h,
 			win_config->dst_x, win_config->dst_y,
 			win_config->dst_w, win_config->dst_h);
-	DRM_DEBUG("rot[%d] afbc[%d] format[%d] ch[%u] zpos[%u] comp_src[%llu]\n",
+	DRM_DEBUG("rot[%d] afbc[%d] format[%d] ch[%u] zpos[%u] comp_src[%llu] hdr[%d]\n",
 			win_config->is_rot, win_config->is_comp,
 			win_config->format, win_config->dpp_id,
 			plane_state->normalized_zpos,
-			win_config->comp_src);
+			win_config->comp_src, win_config->hdr_en);
 	DRM_DEBUG("alpha[%d] blend mode[%d]\n",
 			plane_state->alpha, plane_state->pixel_blend_mode);
 	DRM_DEBUG("simplified rot[0x%x]\n", simplified_rot);
@@ -347,7 +358,7 @@ static void exynos_atomic_bts_pre_update(struct drm_device *dev,
 			if (new_plane_state->crtc) {
 				decon = crtc_to_decon(new_plane_state->crtc);
 				win_config = &decon->bts.rcd_win_config.win;
-				plane_state_to_win_config(win_config, new_plane_state, dpp->id);
+				plane_state_to_win_config(win_config, new_plane_state, dpp);
 
 				decon->bts.rcd_win_config.dma_addr =
 					exynos_drm_fb_dma_addr(new_plane_state->fb, 0);
@@ -360,7 +371,7 @@ static void exynos_atomic_bts_pre_update(struct drm_device *dev,
 			decon = crtc_to_decon(new_plane_state->crtc);
 			win_config = &decon->bts.win_config[zpos];
 
-			plane_state_to_win_config(win_config, new_plane_state, dpp->id);
+			plane_state_to_win_config(win_config, new_plane_state, dpp);
 
 			decon->dpp[i]->dbg_dma_addr =
 				exynos_drm_fb_dma_addr(new_plane_state->fb, 0);
@@ -440,7 +451,7 @@ static void exynos_atomic_bts_post_update(struct drm_device *dev,
 	for_each_new_crtc_in_state(old_state, crtc, new_crtc_state, i) {
 		decon = crtc_to_decon(crtc);
 
-		if (new_crtc_state->planes_changed && new_crtc_state->active) {
+		if (new_crtc_state->active) {
 
 			/*
 			 * keeping a copy of comp src in dpp after it has been
@@ -467,6 +478,80 @@ static void exynos_atomic_bts_post_update(struct drm_device *dev,
 			decon->bts.ops->release_bw(decon);
 	}
 }
+
+/*
+ * rmem_device_init is called in of_reserved_mem_device_init_by_idx function
+ * when reserved memory is required.
+ */
+static int rmem_device_init(struct reserved_mem *rmem, struct device *dev)
+{
+	struct decon_device *decon = dev_get_drvdata(dev);
+
+	decon->fb_handover.phys_addr = rmem->base;
+	decon->fb_handover.phys_size = rmem->size;
+	pr_debug("%s base(%pa) size(%pa)\n", __func__, &decon->fb_handover.phys_addr,
+			&decon->fb_handover.phys_size);
+
+	return 0;
+}
+
+/*
+ * rmem_device_release is called in of_reserved_mem_device_release function
+ * when reserved memory is no longer required.
+ */
+static void rmem_device_release(struct reserved_mem *rmem, struct device *dev)
+{
+	struct page *first = phys_to_page(PAGE_ALIGN(rmem->base));
+	struct page *last = phys_to_page((rmem->base + rmem->size) & PAGE_MASK);
+	struct page *page;
+
+	for (page = first; page != last; page++) {
+		__ClearPageReserved(page);
+		set_page_count(page, 1);
+		__free_pages(page, 0);
+		adjust_managed_page_count(page, 1);
+	}
+}
+
+static const struct reserved_mem_ops rmem_ops = {
+	.device_init    = rmem_device_init,
+	.device_release = rmem_device_release,
+};
+
+void exynos_rmem_register(struct decon_device *decon)
+{
+	struct device_node *np, *rmem_np;
+	struct reserved_mem *rmem;
+	struct device *dev = decon->dev;
+
+	np = dev->of_node;
+
+	rmem_np = of_parse_phandle(np, "memory-region", 0);
+	if (!rmem_np) {
+		pr_debug("failed to get reserve memory phandle\n");
+		return;
+	}
+
+	rmem = of_reserved_mem_lookup(rmem_np);
+	if (!rmem) {
+		pr_err("failed to reserve memory lookup\n");
+		return;
+	}
+
+	of_node_put(rmem_np);
+	rmem->ops = &rmem_ops;
+	decon->fb_handover.rmem = rmem;
+	of_reserved_mem_device_init_by_idx(dev, np, 0);
+}
+
+static void exynos_rmem_free(struct decon_device *decon)
+{
+	of_reserved_mem_device_release(decon->dev);
+
+	decon->fb_handover.rmem = NULL;
+	decon->fb_handover.phys_size = 0;
+}
+
 
 static void exynos_atomic_commit_tail(struct drm_atomic_state *old_state)
 {
@@ -616,6 +701,13 @@ static void exynos_atomic_commit_tail(struct drm_atomic_state *old_state)
 		decon = crtc_to_decon(crtc);
 		if (disabling_crtc_mask & drm_crtc_mask(crtc))
 			pm_runtime_put_sync(decon->dev);
+		if (decon->fb_handover.rmem) {
+			struct exynos_drm_crtc_state *exynos_crtc_state =
+				to_exynos_crtc_state(new_crtc_state);
+
+			if (!exynos_crtc_state->skip_update)
+				exynos_rmem_free(decon);
+		}
 	}
 
 	drm_atomic_helper_commit_hw_done(old_state);

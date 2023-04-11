@@ -76,6 +76,7 @@ DEFINE_MUTEX(g_dsim_lock);
 
 #define PANEL_DRV_LEN 64
 #define RETRY_READ_FIFO_MAX 10
+#define PANEL_ID_LENGTH 3
 
 static char panel_name[PANEL_DRV_LEN];
 module_param_string(panel_name, panel_name, sizeof(panel_name), 0644);
@@ -102,8 +103,6 @@ pr_err("%s[%d]: "fmt, dsim->dev->driver->name, dsim->id, ##__VA_ARGS__)
 
 #define dsim_debug(dsim, fmt, ...)	\
 pr_debug("%s[%d]: "fmt, dsim->dev->driver->name, dsim->id, ##__VA_ARGS__)
-
-#define host_to_dsi(host) container_of(host, struct dsim_device, dsi_host)
 
 #define DSIM_ESCAPE_CLK_20MHZ	20
 
@@ -279,6 +278,7 @@ static void _dsim_enable(struct dsim_device *dsim)
 {
 	const struct decon_device *decon = dsim_get_decon(dsim);
 	struct dsim_device *sec_dsi;
+	bool skip_init = false;
 
 	pm_runtime_get_sync(dsim->dev);
 
@@ -297,9 +297,16 @@ static void _dsim_enable(struct dsim_device *dsim)
 #endif
 
 	dsim_phy_power_on(dsim);
+	if (dsim->state == DSIM_STATE_HANDOVER) {
+		skip_init = dsim_reg_is_pll_stable(dsim->id);
+		dsim_info(dsim, "dsim handover. skip_init=%d\n", skip_init);
+	}
 
 	mutex_lock(&g_dsim_lock);
-	dsim_reg_init(dsim->id, &dsim->config, &dsim->clk_param, true);
+
+	if (!skip_init)
+		dsim_reg_init(dsim->id, &dsim->config, &dsim->clk_param, true);
+
 	dsim_reg_start(dsim->id);
 	mutex_unlock(&g_dsim_lock);
 
@@ -368,7 +375,7 @@ static void dsim_encoder_enable(struct drm_encoder *encoder, struct drm_atomic_s
 	}
 
 
-	if (dsim->state == DSIM_STATE_SUSPEND) {
+	if (dsim->state == DSIM_STATE_SUSPEND || dsim->state == DSIM_STATE_HANDOVER) {
 		_dsim_enable(dsim);
 		dsim_set_te_pinctrl(dsim, 1);
 	} else if (dsim->state == DSIM_STATE_BYPASS) {
@@ -383,6 +390,40 @@ static void dsim_encoder_enable(struct drm_encoder *encoder, struct drm_atomic_s
 	}
 }
 
+static inline bool dsim_cmd_packetgo_is_enabled(const struct dsim_device *dsim)
+{
+	return dsim->total_pend_ph > 0;
+}
+
+static void __dsim_cmd_packetgo_enable_locked(struct dsim_device *dsim, bool en)
+{
+	if (en) {
+		pm_runtime_get_sync(dsim->dev);
+		dsim_debug(dsim, "enabling packetgo\n");
+	}
+
+	dsim_reg_enable_packetgo(dsim->id, en);
+	if (!en) {
+		pm_runtime_put(dsim->dev);
+
+		dsim->total_pend_ph = 0;
+		dsim->total_pend_pl = 0;
+		dsim_debug(dsim, "packetgo disabled\n");
+	}
+}
+
+static void __dsim_check_pend_cmd_locked(struct dsim_device *dsim)
+{
+	WARN_ON(!mutex_is_locked(&dsim->cmd_lock));
+
+	if (WARN_ON(dsim_reg_has_pend_cmd(dsim->id)))
+		dsim_dump(dsim);
+
+	if (WARN(dsim_cmd_packetgo_is_enabled(dsim), "pending packets remaining ph(%u) pl(%u)\n",
+		 dsim->total_pend_ph, dsim->total_pend_pl))
+		__dsim_cmd_packetgo_enable_locked(dsim, false);
+}
+
 static void _dsim_enter_ulps_locked(struct dsim_device *dsim)
 {
 	const struct decon_device *decon = dsim_get_decon(dsim);
@@ -395,8 +436,7 @@ static void _dsim_enter_ulps_locked(struct dsim_device *dsim)
 
 	/* Wait for current read & write CMDs. */
 	mutex_lock(&dsim->cmd_lock);
-	if (WARN_ON(dsim_reg_has_pend_cmd(dsim->id)))
-		dsim_dump(dsim);
+	__dsim_check_pend_cmd_locked(dsim);
 	dsim->state = DSIM_STATE_ULPS;
 	mutex_unlock(&dsim->cmd_lock);
 
@@ -448,14 +488,13 @@ static void _dsim_disable(struct dsim_device *dsim)
 	disable_irq(dsim->irq);
 
 	dsim->state = DSIM_STATE_SUSPEND;
-	WARN_ON(dsim_reg_has_pend_cmd(dsim->id));
+	__dsim_check_pend_cmd_locked(dsim);
+
+	dsim->force_batching = false;
 	mutex_unlock(&dsim->cmd_lock);
 	mutex_unlock(&dsim->state_lock);
 
 	dsim_phy_power_off(dsim);
-	dsim->total_pend_ph = 0;
-	dsim->total_pend_pl = 0;
-	dsim->force_batching = false;
 
 #if defined(CONFIG_CPU_IDLE)
 	exynos_update_ip_idle_status(dsim->idle_ip_index, 1);
@@ -1254,8 +1293,13 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 	struct device_node *node;
 	const char *name;
 	const char *dual_dsi;
+	const char *p;
+	u32 cmp_len;
 
-	dsim_debug(dsim, "preferred panel is %s\n", pname);
+	p = strchr(pname, '.');
+	cmp_len = p ? min((ptrdiff_t)PANEL_DRV_LEN, p - pname) : strnlen(pname, PANEL_DRV_LEN);
+
+	dsim_debug(dsim, "preferred panel is %.*s\n", cmp_len, pname);
 
 	for_each_available_child_of_node(dsim->dsi_host.dev->of_node, node) {
 		bool found;
@@ -1286,7 +1330,7 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 			continue;
 
 		/* if panel name is not specified pick the first device found */
-		found = !strncmp(name, pname, PANEL_DRV_LEN);
+		found = !strncmp(name, pname, cmp_len);
 		if (pname[0] == '\0' || found) {
 			/*
 			 * The default is primary panel. If not, add priority
@@ -1347,6 +1391,24 @@ static const char *dsim_get_panel_name(const struct dsim_device *dsim, const cha
 	return p;
 }
 
+static u32 dsim_get_panel_id(const char *name)
+{
+	char *p = strchr(name, '.');
+	u8 panel_id[PANEL_ID_LENGTH];
+
+	/* if period is found, expect 6 hex characters (ex. panel_name.000000),
+	 * otherwise return an invalid panel ID */
+	if (!p)
+		return INVALID_PANEL_ID;
+
+	p++;
+
+	if (strlen(p) != (PANEL_ID_LENGTH * 2) || hex2bin(panel_id, p, PANEL_ID_LENGTH))
+		return INVALID_PANEL_ID;
+
+	return (panel_id[0] << 16) | (panel_id[1] << 8) | panel_id[2];
+}
+
 static int dsim_parse_panel_name(struct dsim_device *dsim)
 {
 	const char *name;
@@ -1354,13 +1416,17 @@ static int dsim_parse_panel_name(struct dsim_device *dsim)
 
 	name = dsim_get_panel_name(dsim, panel_name, PANEL_DRV_LEN);
 	idx = PANEL_PRIORITY_PRI_IDX;
-	if (name && !(panel_usage & BIT(idx)))
+	if (name && !(panel_usage & BIT(idx))) {
+		dsim->panel_id = dsim_get_panel_id(panel_name);
 		return dsim_add_mipi_dsi_device(dsim, name, idx);
+	}
 
 	name = dsim_get_panel_name(dsim, sec_panel_name, PANEL_DRV_LEN);
 	idx = PANEL_PRIORITY_SEC_IDX;
-	if (name && name[0] && !(panel_usage & BIT(idx)))
+	if (name && name[0] && !(panel_usage & BIT(idx))) {
+		dsim->panel_id = dsim_get_panel_id(sec_panel_name);
 		return dsim_add_mipi_dsi_device(dsim, name, idx);
+	}
 
 	return -ENODEV;
 }
@@ -1373,9 +1439,6 @@ static int dsim_bind(struct device *dev, struct device *master, void *data)
 	int ret = 0;
 
 	dsim_debug(dsim, "%s +\n", __func__);
-
-	/* parse the panel name to select the dsi device for the detected panel */
-	dsim_parse_panel_name(dsim);
 
 	if (dsim->dual_dsi == DSIM_DUAL_DSI_SEC)
 		return 0;
@@ -1709,6 +1772,11 @@ static int dsim_host_attach(struct mipi_dsi_host *host,
 		}
 	}
 
+	if (IS_ERR_OR_NULL(dsim->encoder.dev)) {
+		dsim_err(dsim, "encoder is not initialized\n");
+		return PTR_ERR(dsim->encoder.dev);
+	}
+
 	ret = drm_bridge_attach(&dsim->encoder, bridge, NULL, 0);
 	if (ret) {
 		dsim_err(dsim, "Unable to attach panel bridge\n");
@@ -1752,10 +1820,16 @@ static int __dsim_wait_for_ph_fifo_empty(struct dsim_device *dsim)
 {
 	const struct decon_device *decon = dsim_get_decon(dsim);
 
+	if (dsim_reg_header_fifo_is_empty(dsim->id)) {
+		dsim_debug(dsim, "no need to wait for packet header fifo empty\n");
+		return 0;
+	}
+
 	dsim_debug(dsim, "wait for packet header fifo empty\n");
 
 	if (!wait_for_completion_timeout(&dsim->ph_wr_comp, MIPI_WR_TIMEOUT)) {
 		if (dsim_reg_header_fifo_is_empty(dsim->id)) {
+			dsim_warn(dsim, "timed out but header fifo was empty\n");
 			dsim_reg_clear_int(dsim->id,
 					DSIM_INTSRC_SFR_PH_FIFO_EMPTY);
 			return 0;
@@ -1778,10 +1852,16 @@ static int __dsim_wait_for_pl_fifo_empty(struct dsim_device *dsim)
 {
 	const struct decon_device *decon = dsim_get_decon(dsim);
 
+	if (dsim_reg_payload_fifo_is_empty(dsim->id)) {
+		dsim_debug(dsim, "no need to wait for payload fifo empty\n");
+		return 0;
+	}
+
 	dsim_debug(dsim, "wait for packet payload fifo empty\n");
 
 	if (!wait_for_completion_timeout(&dsim->pl_wr_comp, MIPI_WR_TIMEOUT)) {
 		if (dsim_reg_payload_fifo_is_empty(dsim->id)) {
+			dsim_warn(dsim, "timed out but payload fifo was empty\n");
 			dsim_reg_clear_int(dsim->id,
 					DSIM_INTSRC_SFR_PL_FIFO_EMPTY);
 			return 0;
@@ -1845,39 +1925,79 @@ dsim_write_payload(struct dsim_device *dsim, const u8* buf, size_t len)
 	}
 }
 
-static void __dsim_write_data(struct dsim_device *dsim,
-				const struct mipi_dsi_msg *msg, bool is_long)
+static void __dsim_cmd_write_locked(struct dsim_device *dsim, const struct mipi_dsi_packet *packet)
 {
-	struct mipi_dsi_packet packet;
+	WARN_ON(!mutex_is_locked(&dsim->cmd_lock));
 
-	mipi_dsi_create_packet(&packet, msg);
+	if (packet->payload_length > 0)
+		dsim_write_payload(dsim, packet->payload, packet->payload_length);
+	dsim_reg_wr_tx_header(dsim->id, packet->header[0], packet->header[1], packet->header[2],
+			      false);
 
-	if (is_long)
-		dsim_write_payload(dsim, packet.payload, packet.payload_length);
-	dsim_reg_wr_tx_header(dsim->id, packet.header[0], packet.header[1],
-						packet.header[2], false);
+	dsim_debug(dsim, "header(0x%x 0x%x 0x%x) size(%lu) ph fifo(%d)\n", packet->header[0],
+		   packet->header[1], packet->header[2], packet->size,
+		   dsim_reg_get_ph_cnt(dsim->id));
+}
 
-	dsim_debug(dsim, "header(0x%x 0x%x 0x%x) size(%lu) ph fifo(%d)\n",
-			packet.header[0], packet.header[1], packet.header[2],
-			packet.size, dsim_reg_get_ph_cnt(dsim->id));
+static void dsim_cmd_packetgo_queue_locked(struct dsim_device *dsim,
+					   const struct mipi_dsi_packet *packet)
+{
+	/* if this is the first packet being queued, enable packet go feature */
+	if (!dsim->total_pend_ph)
+		__dsim_cmd_packetgo_enable_locked(dsim, true);
+
+	dsim->total_pend_ph++;
+	dsim->total_pend_pl += ALIGN(packet->payload_length, 4);
+
+	__dsim_cmd_write_locked(dsim, packet);
+
+	dsim_debug(dsim, "total pending packet header(%u) payload(%u)\n", dsim->total_pend_ph,
+		   dsim->total_pend_pl);
+}
+
+static void __dsim_cmd_prepare(struct dsim_device *dsim)
+{
+	WARN_ON(!mutex_is_locked(&dsim->cmd_lock));
+
+	dsim_reg_clear_int(dsim->id, DSIM_INTSRC_SFR_PH_FIFO_EMPTY | DSIM_INTSRC_SFR_PL_FIFO_EMPTY);
+
+	reinit_completion(&dsim->ph_wr_comp);
+	reinit_completion(&dsim->pl_wr_comp);
+}
+
+static int dsim_cmd_packetgo_flush_locked(struct dsim_device *dsim)
+{
+	int ret;
+
+	/* this should only be called with pending packets */
+	WARN_ON(!dsim->total_pend_ph);
+
+	__dsim_cmd_prepare(dsim);
+
+	dsim_reg_ready_packetgo(dsim->id, true);
+	dsim_debug(dsim, "packet go ready (ph: %d, pl: %d)\n", dsim->total_pend_ph,
+		   dsim->total_pend_pl);
+
+	ret = dsim_wait_for_cmd_fifo_empty(dsim, dsim->total_pend_pl > 0);
+	if (ret)
+		dsim_warn(dsim, "packetgo failed on wait for cmd fifo empty (%d)\n", ret);
+
+	/* clear packetgo pending (even if it timed out) */
+	__dsim_cmd_packetgo_enable_locked(dsim, false);
+
+	return ret;
 }
 
 static int dsim_write_single_cmd_locked(struct dsim_device *dsim,
-				const struct mipi_dsi_msg *msg, bool is_long)
+					const struct mipi_dsi_packet *packet)
 {
-	const u8 *tx_buf = msg->tx_buf;
+	WARN_ON(dsim_cmd_packetgo_is_enabled(dsim));
 
-	WARN_ON(!mutex_is_locked(&dsim->cmd_lock));
+	__dsim_cmd_prepare(dsim);
 
-	DPU_EVENT_LOG_CMD(dsim, msg->type, tx_buf[0], msg->tx_len);
+	__dsim_cmd_write_locked(dsim, packet);
 
-	dsim_reg_clear_int(dsim->id, DSIM_INTSRC_SFR_PH_FIFO_EMPTY);
-
-	reinit_completion(is_long ? &dsim->pl_wr_comp : &dsim->ph_wr_comp);
-
-	__dsim_write_data(dsim, msg, is_long);
-
-	return dsim_wait_for_cmd_fifo_empty(dsim, is_long);
+	return dsim_wait_for_cmd_fifo_empty(dsim, packet->payload_length > 0);
 }
 
 /*
@@ -1938,24 +2058,33 @@ static void need_wait_vblank(struct dsim_device *dsim)
 
 #define PL_FIFO_THRESHOLD	mult_frac(MAX_PL_FIFO, 75, 100) /* 75% */
 #define IS_LAST(flags)		(((flags) & EXYNOS_DSI_MSG_QUEUE) == 0)
-static int
-dsim_write_data(struct dsim_device *dsim, const struct mipi_dsi_msg *msg)
+static int dsim_write_data_locked(struct dsim_device *dsim, const struct mipi_dsi_msg *msg)
 {
 	int ret = 0;
-	u16 flags = msg->flags;
-	bool is_long;
-	bool is_empty_msg;
+	const u16 flags = msg->flags;
 	bool is_last;
+	struct mipi_dsi_packet packet = { .size = 0 };
 
+	WARN_ON(!mutex_is_locked(&dsim->cmd_lock));
+
+	if (msg->tx_len > 0) {
+		const u8 *tx_buf = msg->tx_buf;
+
+		ret = mipi_dsi_create_packet(&packet, msg);
+		if (ret) {
+			dsim_err(dsim, "unable to create dsi packet (%d)\n", ret);
+			return 0;
+		}
+
+		DPU_EVENT_LOG_CMD(dsim, msg->type, tx_buf[0], msg->tx_len);
+	}
 	DPU_ATRACE_BEGIN(__func__);
 
-	is_empty_msg = !msg->tx_buf || msg->tx_len == 0;
-	is_long = mipi_dsi_packet_format_is_long(msg->type);
 	if (dsim->config.mode == DSIM_VIDEO_MODE) {
 		if (flags & (EXYNOS_DSI_MSG_FORCE_BATCH | EXYNOS_DSI_MSG_FORCE_FLUSH))
 			dsim_warn(dsim, "force batching is attempted in video mode\n");
-		if (!is_empty_msg)
-			ret = dsim_write_single_cmd_locked(dsim, msg, is_long);
+		if (packet.size)
+			ret = dsim_write_single_cmd_locked(dsim, &packet);
 		goto err;
 	}
 
@@ -1965,8 +2094,8 @@ dsim_write_data(struct dsim_device *dsim, const struct mipi_dsi_msg *msg)
 		goto err;
 	}
 
-	if (((dsim->total_pend_pl + msg->tx_len) > MAX_PL_FIFO) ||
-			(dsim->total_pend_ph == MAX_PH_FIFO)) {
+	if (((dsim->total_pend_pl + packet.payload_length) > MAX_PL_FIFO) ||
+	    (dsim->total_pend_ph >= MAX_PH_FIFO)) {
 		dsim_err(dsim, "fifo would be full. ph(%u) pl(%lu) max(%d/%d)\n",
 				dsim->total_pend_ph,
 				dsim->total_pend_pl + msg->tx_len,
@@ -1979,14 +2108,15 @@ dsim_write_data(struct dsim_device *dsim, const struct mipi_dsi_msg *msg)
 
 	if (flags & EXYNOS_DSI_MSG_FORCE_FLUSH) {
 		dsim->force_batching = false;
-		WARN_ON(!is_empty_msg);
+		/* force batching should happen only with empty msg */
+		WARN_ON(packet.size);
 	}
 
-	if (!is_last && !is_empty_msg &&
-		(((dsim->total_pend_ph + 1) == MAX_PH_FIFO) ||
-		((dsim->total_pend_pl + msg->tx_len) > PL_FIFO_THRESHOLD))) {
-		dsim_warn(dsim, "warning. changed last command. pend pl/pl(%u,%u)\n",
-				dsim->total_pend_ph, dsim->total_pend_pl);
+	if (!is_last && packet.size &&
+	    (((dsim->total_pend_ph + 1) >= MAX_PH_FIFO) ||
+	     ((dsim->total_pend_pl + packet.payload_length) > PL_FIFO_THRESHOLD))) {
+		dsim_warn(dsim, "warning. changed last command. pend pl/pl(%u,%u) new pl(%zu)\n",
+			  dsim->total_pend_ph, dsim->total_pend_pl, packet.payload_length);
 		is_last = true;
 	}
 
@@ -1994,40 +2124,19 @@ dsim_write_data(struct dsim_device *dsim, const struct mipi_dsi_msg *msg)
 	dsim_debug(dsim, "%s last command\n", is_last ? "" : "Not");
 
 	if (is_last) {
-		if (dsim->total_pend_ph) {
-			reinit_completion(is_long ?
-					&dsim->pl_wr_comp : &dsim->ph_wr_comp);
-
-			if (!is_empty_msg)
-				__dsim_write_data(dsim, msg, is_long);
+		if (dsim_cmd_packetgo_is_enabled(dsim)) {
+			if (packet.size > 0)
+				dsim_cmd_packetgo_queue_locked(dsim, &packet);
 
 			if (!(flags & EXYNOS_DSI_MSG_IGNORE_VBLANK))
 				need_wait_vblank(dsim);
 
-			dsim_reg_ready_packetgo(dsim->id, true);
-			dsim_debug(dsim, "packet go ready\n");
-
-			ret = dsim_wait_for_cmd_fifo_empty(dsim, is_long);
-			if (!ret) {
-				dsim_reg_enable_packetgo(dsim->id, false);
-				dsim->total_pend_ph = 0;
-				dsim->total_pend_pl = 0;
-			}
-
-			pm_runtime_put_sync(dsim->dev);
-		} else if (!is_empty_msg) {
-			ret = dsim_write_single_cmd_locked(dsim, msg, is_long);
+			ret = dsim_cmd_packetgo_flush_locked(dsim);
+		} else if (packet.size > 0) {
+			ret = dsim_write_single_cmd_locked(dsim, &packet);
 		}
-	} else if (!is_empty_msg) {
-		if (!dsim->total_pend_ph) {
-			pm_runtime_get_sync(dsim->dev);
-			dsim_reg_enable_packetgo(dsim->id, true);
-		}
-		dsim->total_pend_ph++;
-		dsim->total_pend_pl += ALIGN(msg->tx_len, 4);
-		__dsim_write_data(dsim, msg, is_long);
-		dsim_debug(dsim, "total pending packet header(%u) payload(%u)\n",
-				dsim->total_pend_ph, dsim->total_pend_pl);
+	} else if (packet.size > 0) {
+		dsim_cmd_packetgo_queue_locked(dsim, &packet);
 	}
 
 err:
@@ -2167,7 +2276,7 @@ dsim_write_data_dual(struct dsim_device *dsim, const struct mipi_dsi_msg *msg)
 
 	mutex_lock(&dsim->cmd_lock);
 
-	ret = dsim_write_data(dsim, msg);
+	ret = dsim_write_data_locked(dsim, msg);
 
 	mutex_unlock(&dsim->cmd_lock);
 
@@ -2205,7 +2314,7 @@ static ssize_t dsim_host_transfer(struct mipi_dsi_host *host,
 		ret = dsim_read_data(dsim, msg);
 		break;
 	default:
-		ret = dsim_write_data(dsim, msg);
+		ret = dsim_write_data_locked(dsim, msg);
 		if (dsim->dual_dsi == DSIM_DUAL_DSI_MAIN) {
 			sec_dsi = exynos_get_dual_dsi(DSIM_DUAL_DSI_SEC);
 			if (sec_dsi)
@@ -2581,8 +2690,12 @@ static int dsim_probe(struct platform_device *pdev)
 		dsim_warn(dsim, "idle ip index is not provided\n");
 	exynos_update_ip_idle_status(dsim->idle_ip_index, 1);
 #endif
+	dsim->state = DSIM_STATE_HANDOVER;
 
-	dsim->state = DSIM_STATE_SUSPEND;
+	/* parse the panel name to select the dsi device for the detected panel */
+	dsim_parse_panel_name(dsim);
+
+	// TODO: get which panel is active from bootloader?
 
 	pm_runtime_use_autosuspend(dsim->dev);
 	pm_runtime_set_autosuspend_delay(dsim->dev, 20);

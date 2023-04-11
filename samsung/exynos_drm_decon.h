@@ -49,6 +49,7 @@ enum decon_state {
 	DECON_STATE_ON,
 	DECON_STATE_HIBERNATION,
 	DECON_STATE_OFF,
+	DECON_STATE_HANDOVER,
 };
 
 enum dpu_win_state {
@@ -88,6 +89,7 @@ struct dpu_bts_win_config {
 	bool is_rot;
 	bool is_comp;
 	bool is_secure;
+	bool hdr_en;
 	u32 dpp_id;
 	u32 zpos;
 	u32 format;
@@ -141,7 +143,7 @@ struct dpu_bts {
 	u32 max_disp_freq;
 	u32 prev_max_disp_freq;
 	u32 dvfs_max_disp_freq;
-	u64 ppc;
+	u32 ppc;
 	u32 ppc_rotator;
 	u32 ppc_scaler;
 	u32 delay_comp;
@@ -304,6 +306,7 @@ struct dpu_log_win {
 	u32 win_idx;
 	u32 plane_idx;
 	bool secure;
+	bool hdr_en;
 };
 
 struct dpu_log_rsc_occupancy {
@@ -457,6 +460,7 @@ struct decon_device {
 	struct kthread_work		buf_dump_work;
 	struct exynos_recovery		recovery;
 	struct exynos_dma		*cgc_dma;
+	struct exynos_fb_handover	fb_handover;
 
 	u32				irq_fs;	/* frame start irq number*/
 	u32				irq_fd;	/* frame done irq number*/
@@ -464,6 +468,7 @@ struct decon_device {
 	int				irq_te;
 	int				irq_ds;	/* dimming start irq number */
 	int				irq_de;	/* dimming end irq number */
+	int				te_gpio;
 	atomic_t			te_ref;
 	struct completion te_rising; /* signaled when irq_te is triggered */
 
@@ -502,7 +507,8 @@ static inline struct decon_device *get_decon_drvdata(u32 id)
 }
 
 bool decon_dump_ignore(enum dpu_event_condition condition);
-void decon_dump(const struct decon_device *decon);
+void decon_dump(struct decon_device *decon, struct drm_printer *p);
+void decon_dump_locked(const struct decon_device *decon, struct drm_printer *p);
 void decon_dump_all(struct decon_device *decon,
 		enum dpu_event_condition cond, bool async_buf_dump);
 void decon_enable_te_irq(struct decon_device *decon, bool enable);
