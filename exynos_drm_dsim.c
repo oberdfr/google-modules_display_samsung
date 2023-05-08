@@ -2700,7 +2700,10 @@ static int dsim_probe(struct platform_device *pdev)
 		dsim_warn(dsim, "idle ip index is not provided\n");
 	exynos_update_ip_idle_status(dsim->idle_ip_index, 1);
 #endif
-	dsim->state = DSIM_STATE_HANDOVER;
+	if (IS_ENABLED(CONFIG_BOARD_EMULATOR))
+		dsim->state = DSIM_STATE_SUSPEND;
+	else
+		dsim->state = DSIM_STATE_HANDOVER;
 
 	/* parse the panel name to select the dsi device for the detected panel */
 	dsim_parse_panel_name(dsim);
