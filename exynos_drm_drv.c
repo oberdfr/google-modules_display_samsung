@@ -38,6 +38,10 @@
 #include "exynos_drm_writeback.h"
 #include "exynos_drm_dqe.h"
 
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+#include "gs_drm/gs_drm_connector.h"
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/dpu_trace.h>
 
@@ -290,16 +294,29 @@ static void exynos_atomic_prepare_partial_update(struct drm_atomic_state *state)
 			continue;
 
 		if (drm_atomic_crtc_needs_modeset(new_crtc_state)) {
-			const struct exynos_drm_connector_state *exynos_conn_state =
-				crtc_get_exynos_connector_state(state, new_crtc_state);
-
-			if (exynos_conn_state) {
+			const struct drm_connector_state *conn_state =
+				crtc_get_connector_state(state, new_crtc_state);
+			if (conn_state && is_exynos_drm_connector(conn_state->connector)) {
 				const struct exynos_display_partial *p =
-					&exynos_conn_state->partial;
+					&to_exynos_connector_state(conn_state)->partial;
 
 				decon->partial = exynos_partial_initialize(decon,
 						p, &new_crtc_state->mode);
 			}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+			else if (conn_state && is_gs_drm_connector(conn_state->connector)) {
+				const struct gs_drm_connector_state *gs_conn_state =
+					to_gs_connector_state(conn_state);
+				const struct exynos_display_partial p = {
+					.enabled = gs_conn_state->partial.enabled,
+					.min_width = gs_conn_state->partial.min_width,
+					.min_height = gs_conn_state->partial.min_height,
+				};
+
+				decon->partial =
+					exynos_partial_initialize(decon, &p, &new_crtc_state->mode);
+			}
+#endif
 		}
 
 		partial = decon->partial;

@@ -66,6 +66,12 @@
 #include "exynos_drm_decon.h"
 #include "exynos_drm_dsim.h"
 
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+#include "gs_drm/gs_drm_connector.h"
+#define BRIDGE_PORT 0
+#define BRIDGE_ENDPOINT 0
+#endif
+
 EXPORT_TRACEPOINT_SYMBOL(dsi_label_scope);
 
 struct dsim_device *dsim_drvdata[MAX_DSI_CNT];
@@ -360,12 +366,11 @@ static void dsim_encoder_enable(struct drm_encoder *encoder, struct drm_atomic_s
 		struct drm_connector_state *conn_state =
 				drm_atomic_get_old_connector_state(state, connector);
 
-		if (conn_state) {
-			struct exynos_drm_connector_state *exynos_conn_state =
-					to_exynos_connector_state(conn_state);
+		if (conn_state && atomic_read(&decon->recovery.recovering)) {
+			struct dsim_connector_funcs *funcs = get_connector_funcs(conn_state);
 
-			if (atomic_read(&decon->recovery.recovering)) {
-				exynos_conn_state->is_recovering = true;
+			if (funcs && funcs->set_state_recovering) {
+				funcs->set_state_recovering(conn_state);
 				dsim_debug(dsim, "%s: doing recovery\n", __func__);
 			}
 		}
@@ -1070,9 +1075,11 @@ static void dsim_of_get_pll_diags(struct dsim_device * /* dsim */)
 
 #endif
 
-static void dsim_update_config_for_mode(struct dsim_reg_config *config,
-					const struct drm_display_mode *mode,
-					const struct exynos_display_mode *exynos_mode)
+/* exynos connector funcs */
+
+static void _update_config_timing(struct dsim_reg_config *config,
+				  const struct drm_display_mode *mode, bool has_underrun_param,
+				  unsigned int te_idle_us, unsigned int te_var)
 {
 	struct dpu_panel_timing *p_timing = &config->p_timing;
 	struct videomode vm;
@@ -1091,49 +1098,77 @@ static void dsim_update_config_for_mode(struct dsim_reg_config *config,
 	p_timing->hbp = vm.hback_porch;
 	p_timing->hsa = vm.hsync_len;
 	p_timing->vrefresh = drm_mode_vrefresh(mode);
-	if (exynos_mode->underrun_param) {
-		p_timing->te_idle_us = exynos_mode->underrun_param->te_idle_us;
-		p_timing->te_var = exynos_mode->underrun_param->te_var;
+	if (has_underrun_param) {
+		p_timing->te_idle_us = te_idle_us;
+		p_timing->te_var = te_var;
 	} else {
 		p_timing->te_idle_us = DEFAULT_TE_IDLE_US;
 		p_timing->te_var = DEFAULT_TE_VARIATION;
 		pr_debug("%s: underrun_param for mode " DRM_MODE_FMT
 			" not specified", __func__, DRM_MODE_ARG(mode));
 	}
+}
 
+static void _update_config_mode_flags(struct dsim_reg_config *config, unsigned long mode_flags)
+{
 	/* TODO: This hard coded information will be defined in device tree */
 	config->mres_mode = 0;
-	config->mode = (exynos_mode->mode_flags & MIPI_DSI_MODE_VIDEO) ?
-				DSIM_VIDEO_MODE : DSIM_COMMAND_MODE;
-	config->bpp = exynos_mode->bpc * 3;
+	config->mode = (mode_flags & MIPI_DSI_MODE_VIDEO) ? DSIM_VIDEO_MODE : DSIM_COMMAND_MODE;
+}
 
-	config->dsc.enabled = exynos_mode->dsc.enabled;
+static void _update_config_dsc(struct dsim_reg_config *config, unsigned int bpc, bool dsc_enabled,
+			       unsigned int dsc_count, unsigned int slice_count,
+			       unsigned int slice_height)
+
+{
+	config->bpp = bpc * 3;
+	config->dsc.enabled = dsc_enabled;
 	if (config->dsc.enabled) {
-		config->dsc.dsc_count = exynos_mode->dsc.dsc_count;
-		config->dsc.slice_count = exynos_mode->dsc.slice_count;
-		config->dsc.slice_height = exynos_mode->dsc.slice_height;
+		config->dsc.dsc_count = dsc_count;
+		config->dsc.slice_count = slice_count;
+		config->dsc.slice_height = slice_height;
 		config->dsc.slice_width = DIV_ROUND_UP(
 				config->p_timing.hactive,
 				config->dsc.slice_count);
 	}
 }
 
-static void dsim_set_display_mode(struct dsim_device *dsim,
-				  const struct drm_display_mode *mode,
-				  const struct exynos_display_mode *exynos_mode)
+static void update_config_for_mode_exynos(struct dsim_reg_config *config,
+					  const struct drm_display_mode *mode,
+					  const struct drm_connector_state *conn_state)
+{
+	const struct exynos_drm_connector_state *exynos_conn_state =
+		to_exynos_connector_state(conn_state);
+	const struct exynos_display_mode *exynos_mode = &exynos_conn_state->exynos_mode;
+	unsigned int te_idle_us =
+		exynos_mode->underrun_param ? exynos_mode->underrun_param->te_idle_us : 0;
+	unsigned int te_var = exynos_mode->underrun_param ? exynos_mode->underrun_param->te_var : 0;
+
+	_update_config_timing(config, mode, exynos_mode->underrun_param ? true : false, te_idle_us,
+			      te_var);
+	_update_config_mode_flags(config, exynos_mode->mode_flags);
+	_update_config_dsc(config, exynos_mode->bpc, exynos_mode->dsc.enabled,
+			   exynos_mode->dsc.dsc_count, exynos_mode->dsc.slice_count,
+			   exynos_mode->dsc.slice_height);
+}
+
+static void dsim_set_display_mode(struct dsim_device *dsim, const struct drm_display_mode *mode,
+				  const struct drm_connector_state *conn_state, bool sw_trigger)
 {
 	struct dsim_device *sec_dsi;
+	struct dsim_connector_funcs *funcs = get_connector_funcs(conn_state);
 
 	if (!dsim->dsi_device)
 		return;
 
 	mutex_lock(&dsim->state_lock);
 	dsim->config.data_lane_cnt = dsim->dsi_device->lanes;
-	dsim->hw_trigger = !exynos_mode->sw_trigger;
+	dsim->hw_trigger = !sw_trigger;
 
 	dsim->config.dual_dsi = dsim->dual_dsi;
-	dsim_update_config_for_mode(&dsim->config, mode, exynos_mode);
 
+	if (funcs && funcs->update_config_for_mode)
+		funcs->update_config_for_mode(&dsim->config, mode, conn_state);
 	dsim_set_clock_mode(dsim, mode);
 
 	if (dsim->state == DSIM_STATE_HSCLKEN)
@@ -1152,20 +1187,32 @@ static void dsim_set_display_mode(struct dsim_device *dsim,
 		sec_dsi = exynos_get_dual_dsi(DSIM_DUAL_DSI_SEC);
 		if (sec_dsi) {
 			sec_dsi->dsi_device = dsim->dsi_device;
-			dsim_set_display_mode(sec_dsi, mode, exynos_mode);
+			dsim_set_display_mode(sec_dsi, mode, conn_state, sw_trigger);
 		} else
 			dsim_err(dsim, "could not get main dsi\n");
 	}
+}
+
+static void dsim_atomic_mode_set_exynos(struct dsim_device *dsim, struct drm_crtc_state *crtc_state,
+					struct drm_connector_state *conn_state)
+{
+	const struct exynos_drm_connector_state *exynos_conn_state =
+		to_exynos_connector_state(conn_state);
+	const struct exynos_display_mode *exynos_mode = &exynos_conn_state->exynos_mode;
+
+	dsim_set_display_mode(dsim, &crtc_state->adjusted_mode, conn_state,
+			      exynos_mode->sw_trigger);
 }
 
 static void dsim_atomic_mode_set(struct drm_encoder *encoder, struct drm_crtc_state *crtc_state,
 				 struct drm_connector_state *conn_state)
 {
 	struct dsim_device *dsim = encoder_to_dsim(encoder);
-	const struct exynos_drm_connector_state *exynos_conn_state =
-		to_exynos_connector_state(conn_state);
+	const struct dsim_connector_funcs *funcs = get_connector_funcs(conn_state);
 
-	dsim_set_display_mode(dsim, &crtc_state->adjusted_mode, &exynos_conn_state->exynos_mode);
+	if (funcs && funcs->atomic_mode_set) {
+		funcs->atomic_mode_set(dsim, crtc_state, conn_state);
+	}
 }
 
 static enum drm_mode_status dsim_mode_valid(struct drm_encoder *encoder,
@@ -1179,6 +1226,14 @@ static enum drm_mode_status dsim_mode_valid(struct drm_encoder *encoder,
 	return MODE_OK;
 }
 
+static void set_state_recovering_exynos(struct drm_connector_state *conn_state)
+{
+	struct exynos_drm_connector_state *exynos_conn_state;
+
+	exynos_conn_state = to_exynos_connector_state(conn_state);
+	exynos_conn_state->is_recovering = true;
+}
+
 /*
  * Check whether mode change can happean seamlessly from dsim perspective.
  * Seamless mode switch from dsim perspective can only happen if there's no
@@ -1186,16 +1241,19 @@ static enum drm_mode_status dsim_mode_valid(struct drm_encoder *encoder,
  */
 static bool dsim_mode_is_seamless(const struct dsim_device *dsim,
 				  const struct drm_display_mode *mode,
-				  const struct exynos_display_mode *exynos_mode)
+				  const struct drm_connector_state *conn_state)
 {
 	struct dsim_reg_config new_config = dsim->config;
+	struct dsim_connector_funcs *funcs = get_connector_funcs(conn_state);
 
 	if (dsim->current_pll_param != dsim_get_clock_mode(dsim, mode)) {
 		dsim_debug(dsim, "clock mode change not allowed seamlessly\n");
 		return false;
 	}
 
-	dsim_update_config_for_mode(&new_config, mode, exynos_mode);
+	if (funcs && funcs->update_config_for_mode) {
+		funcs->update_config_for_mode(&new_config, mode, conn_state);
+	}
 	if (dsim->config.mode != new_config.mode) {
 		dsim_debug(dsim, "op mode change not allowed seamlessly\n");
 		return false;
@@ -1209,47 +1267,138 @@ static bool dsim_mode_is_seamless(const struct dsim_device *dsim,
 	return true;
 }
 
+static int dsim_atomic_check_exynos(const struct dsim_device *dsim,
+				    struct drm_crtc_state *crtc_state,
+				    struct drm_connector_state *conn_state)
+{
+	struct exynos_drm_connector_state *exynos_conn_state =
+		to_exynos_connector_state(conn_state);
+	struct drm_display_mode *mode = &crtc_state->adjusted_mode;
+
+	if (exynos_conn_state->seamless_possible &&
+	    !dsim_mode_is_seamless(dsim, mode, conn_state)) {
+		dsim_warn(dsim, "%s: seamless mode switch not supported for %s\n", __func__,
+			  mode->name);
+		exynos_conn_state->seamless_possible = false;
+	}
+
+	if (!exynos_conn_state->exynos_mode.sw_trigger) {
+		if (!dsim->pinctrl) {
+			dsim_err(dsim, "TE error: pinctrl not found\n");
+			return -EINVAL;
+		} else if ((dsim->te_gpio < 0) || (dsim->te_from >= MAX_DECON_TE_FROM_DDI)) {
+			dsim_err(dsim, "invalid TE config for hw trigger mode\n");
+			return -EINVAL;
+		}
+
+		exynos_conn_state->te_from = dsim->te_from;
+		exynos_conn_state->te_gpio = dsim->te_gpio;
+	}
+	return 0;
+}
+
+static struct dsim_connector_funcs exynos_dsim_connector_funcs = {
+	.atomic_check = &dsim_atomic_check_exynos,
+	.atomic_mode_set = &dsim_atomic_mode_set_exynos,
+	.set_state_recovering = &set_state_recovering_exynos,
+	.update_config_for_mode = &update_config_for_mode_exynos,
+};
+
 static int dsim_atomic_check(struct drm_encoder *encoder,
 			     struct drm_crtc_state *crtc_state,
 			     struct drm_connector_state *connector_state)
 {
-	struct drm_display_mode *mode;
 	const struct dsim_device *dsim = encoder_to_dsim(encoder);
-	struct exynos_drm_connector_state *exynos_conn_state;
+	const struct dsim_connector_funcs *funcs = get_connector_funcs(connector_state);
 
 	if (crtc_state->mode_changed) {
-		if (!is_exynos_drm_connector(connector_state->connector)) {
-			dsim_warn(dsim, "%s: mode set is only supported w/exynos connector\n",
-				  __func__);
+		if (funcs && funcs->atomic_check)
+			return funcs->atomic_check(dsim, crtc_state, connector_state);
+	}
+	return 0;
+}
+
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+/* gs connector funcs */
+static int dsim_atomic_check_gs(const struct dsim_device *dsim, struct drm_crtc_state *crtc_state,
+				struct drm_connector_state *conn_state)
+{
+	struct gs_drm_connector_state *gs_conn_state = to_gs_connector_state(conn_state);
+	struct drm_display_mode *mode = &crtc_state->adjusted_mode;
+
+	if (gs_conn_state->seamless_possible && !dsim_mode_is_seamless(dsim, mode, conn_state)) {
+		dsim_warn(dsim, "%s: seamless mode switch not supported for %s\n", __func__,
+			  mode->name);
+		gs_conn_state->seamless_possible = false;
+	}
+
+	if (!gs_conn_state->gs_mode.sw_trigger) {
+		if (!dsim->pinctrl) {
+			dsim_err(dsim, "TE error: pinctrl not found\n");
+			return -EINVAL;
+		} else if ((dsim->te_gpio < 0) || (dsim->te_from >= MAX_DECON_TE_FROM_DDI)) {
+			dsim_err(dsim, "invalid TE config for hw trigger mode\n");
 			return -EINVAL;
 		}
 
-		exynos_conn_state = to_exynos_connector_state(connector_state);
-		mode = &crtc_state->adjusted_mode;
-
-		if (exynos_conn_state->seamless_possible &&
-		    !dsim_mode_is_seamless(dsim, mode, &exynos_conn_state->exynos_mode)) {
-			dsim_warn(dsim, "%s: seamless mode switch not supported for %s\n",
-				  __func__, mode->name);
-			exynos_conn_state->seamless_possible = false;
-		}
-
-		if (!exynos_conn_state->exynos_mode.sw_trigger) {
-			if (!dsim->pinctrl) {
-				dsim_err(dsim, "TE error: pinctrl not found\n");
-				return -EINVAL;
-			} else if ((dsim->te_gpio < 0) ||
-				   (dsim->te_from >= MAX_DECON_TE_FROM_DDI)) {
-				dsim_err(dsim, "invalid TE config for hw trigger mode\n");
-				return -EINVAL;
-			}
-
-			exynos_conn_state->te_from = dsim->te_from;
-			exynos_conn_state->te_gpio = dsim->te_gpio;
-		}
+		gs_conn_state->te_from = dsim->te_from;
+		gs_conn_state->te_gpio = dsim->te_gpio;
 	}
-
 	return 0;
+}
+
+static void update_config_for_mode_gs(struct dsim_reg_config *config,
+				      const struct drm_display_mode *mode,
+				      const struct drm_connector_state *conn_state)
+{
+	const struct gs_drm_connector_state *gs_conn_state = to_gs_connector_state(conn_state);
+	const struct gs_display_mode *gs_mode = &gs_conn_state->gs_mode;
+	unsigned int te_idle_us = gs_mode->underrun_param ? gs_mode->underrun_param->te_idle_us : 0;
+	unsigned int te_var = gs_mode->underrun_param ? gs_mode->underrun_param->te_var : 0;
+
+	_update_config_timing(config, mode, gs_mode->underrun_param ? true : false, te_idle_us,
+			      te_var);
+	_update_config_mode_flags(config, gs_mode->mode_flags);
+	_update_config_dsc(config, gs_mode->bpc, gs_mode->dsc.enabled, gs_mode->dsc.dsc_count,
+			   gs_mode->dsc.cfg->slice_count, gs_mode->dsc.cfg->slice_height);
+}
+
+static void dsim_atomic_mode_set_gs(struct dsim_device *dsim, struct drm_crtc_state *crtc_state,
+				    struct drm_connector_state *conn_state)
+{
+	const struct gs_drm_connector_state *gs_conn_state = to_gs_connector_state(conn_state);
+	const struct gs_display_mode *gs_mode = &gs_conn_state->gs_mode;
+
+	dsim_set_display_mode(dsim, &crtc_state->adjusted_mode, conn_state, gs_mode->sw_trigger);
+}
+
+static void set_state_recovering_gs(struct drm_connector_state *conn_state)
+{
+	struct gs_drm_connector_state *gs_conn_state;
+
+	gs_conn_state = to_gs_connector_state(conn_state);
+	gs_conn_state->is_recovering = true;
+}
+
+static struct dsim_connector_funcs gs_dsim_connector_funcs = {
+	.atomic_check = &dsim_atomic_check_gs,
+	.atomic_mode_set = &dsim_atomic_mode_set_gs,
+	.set_state_recovering = &set_state_recovering_gs,
+	.update_config_for_mode = &update_config_for_mode_gs,
+};
+#endif
+
+struct dsim_connector_funcs *get_connector_funcs(const struct drm_connector_state *conn_state)
+{
+	if (is_exynos_drm_connector(conn_state->connector))
+		return &exynos_dsim_connector_funcs;
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	else if (is_gs_drm_connector(conn_state->connector))
+		return &gs_dsim_connector_funcs;
+#endif
+	else if (conn_state->connector)
+		dev_warn(conn_state->connector->kdev, "%s Unsupported connector type\n", __func__);
+	return NULL;
 }
 
 static const struct drm_encoder_helper_funcs dsim_encoder_helper_funcs = {
@@ -1294,6 +1443,31 @@ static const struct drm_encoder_funcs dsim_encoder_funcs = {
         .early_unregister = dsim_encoder_early_unregister,
 };
 
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+/**
+ * dsim_has_graph_link_to_bridge() - Checks possible of graph link to connector
+ * @dsim_dev: Pointer to device object associated with dsim device
+ *
+ * Specifically, this function checks whether ports exist from the dsim entry in
+ * the device tree to a valid DT node, using the BRIDGE_PORT and BRIDGE_ENDPOINT
+ * constants (default: port 0, endpoint 0). Does not check whether that DT node
+ * describes a valid drm_connector device.
+ *
+ * Return: whether dsim has a potential of graph connection to a connector
+ */
+static bool dsim_has_graph_link_to_bridge(struct device *dsim_dev)
+{
+	struct device_node *remote;
+
+	if (!of_graph_is_present(dsim_dev->of_node))
+		return false;
+	remote = of_graph_get_remote_node(dsim_dev->of_node, BRIDGE_PORT, BRIDGE_ENDPOINT);
+	if (!remote)
+		return false;
+	return true;
+}
+#endif
+
 static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 	const char *pname, enum panel_priority_index idx)
 {
@@ -1309,6 +1483,16 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 
 	dsim_debug(dsim, "preferred panel is %.*s\n", cmp_len, pname);
 
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	if (dsim_has_graph_link_to_bridge(dsim->dev)) {
+		/* If using gs_drm_connector, only need to change name;
+		 * panel detection and name comparison happens in connector
+		 */
+		gs_connector_set_panel_name(pname, cmp_len);
+		return 0;
+	}
+	/* implied else case: search for legacy panel below */
+#endif
 	info->node = NULL;
 
 	for_each_available_child_of_node(dsim->dsi_host.dev->of_node, node) {
@@ -1468,7 +1652,15 @@ static int dsim_bind(struct device *dev, struct device *master, void *data)
 		return -ENOTSUPP;
 	}
 
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	/* If using gs_drm_connector, do not register panel here */
+	if (dsim_has_graph_link_to_bridge(dsim->dev))
+		goto dsim_bind_out;
+#endif
 	mipi_dsi_device_register_full(&dsim->dsi_host, &dsim->dsi_device_info);
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+dsim_bind_out:
+#endif
 	ret = mipi_dsi_host_register(&dsim->dsi_host);
 
 	dsim_debug(dsim, "%s -\n", __func__);
@@ -1759,8 +1951,27 @@ err:
 	return ret;
 }
 
-static int dsim_host_attach(struct mipi_dsi_host *host,
-				  struct mipi_dsi_device *device)
+static struct drm_bridge *dsim_find_bridge_legacy(struct mipi_dsi_device *device)
+{
+	struct drm_bridge *bridge;
+	bridge = of_drm_find_bridge(device->dev.of_node);
+	if (!bridge) {
+		struct drm_panel *panel;
+
+		panel = of_drm_find_panel(device->dev.of_node);
+		if (IS_ERR(panel)) {
+			dev_err(&device->dev, "failed to find panel\n");
+			return (struct drm_bridge *)panel; /* IS_ERR */
+		}
+
+		bridge = devm_drm_panel_bridge_add_typed(&device->dev, panel,
+							 DRM_MODE_CONNECTOR_DSI);
+		return bridge;
+	}
+	return bridge;
+}
+
+static int dsim_host_attach(struct mipi_dsi_host *host, struct mipi_dsi_device *device)
 {
 	struct dsim_device *dsim = host_to_dsi(host);
 	struct drm_bridge *bridge;
@@ -1768,22 +1979,23 @@ static int dsim_host_attach(struct mipi_dsi_host *host,
 
 	dsim_debug(dsim, "%s +\n", __func__);
 
-	bridge = of_drm_find_bridge(device->dev.of_node);
-	if (!bridge) {
-		struct drm_panel *panel;
-
-		panel = of_drm_find_panel(device->dev.of_node);
-		if (IS_ERR(panel)) {
-			dsim_err(dsim, "failed to find panel\n");
-			return PTR_ERR(panel);
-		}
-
-		bridge = devm_drm_panel_bridge_add_typed(host->dev, panel,
-						   DRM_MODE_CONNECTOR_DSI);
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	if (dsim_has_graph_link_to_bridge(dsim->dev)) {
+		bridge = devm_drm_of_get_bridge(dsim->dev, dsim->dev->of_node, BRIDGE_PORT,
+						BRIDGE_ENDPOINT);
 		if (IS_ERR(bridge)) {
-			dsim_err(dsim, "failed to create panel bridge\n");
 			return PTR_ERR(bridge);
 		}
+	} else {
+		/* compiled for unified panel but not using gs_connector */
+		bridge = dsim_find_bridge_legacy(device);
+	}
+#else
+	bridge = dsim_find_bridge_legacy(device);
+#endif
+	if (IS_ERR(bridge)) {
+		dsim_err(dsim, "failed to create panel bridge\n");
+		return PTR_ERR(bridge);
 	}
 
 	if (IS_ERR_OR_NULL(dsim->encoder.dev)) {
