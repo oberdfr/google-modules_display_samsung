@@ -271,7 +271,8 @@ void dpp_dump(struct drm_printer *p, struct dpp_device *dpp)
 		return;
 	}
 	__dpp_dump(p, dpp->id, dpp->regs.dpp_base_regs, dpp->regs.dma_base_regs,
-		   dpp->regs.sramc_base_regs, dpp->regs.hdr_comm_base_regs, dpp->attr);
+		   dpp->regs.sramc_base_regs, dpp->regs.hdr_comm_base_regs,
+		   dpp->regs.hdr_base_regs, dpp->attr);
 }
 
 void rcd_dump(struct drm_printer *p, struct dpp_device *dpp)
@@ -289,16 +290,57 @@ void cgc_dump(struct drm_printer *p, struct exynos_dma *dma)
 	__cgc_dump(p, dma->id, dma->regs);
 }
 
-bool dpp_need_enable_hdr(const struct dpp_device *dpp)
+static bool is_fmt_fp16(const struct dpu_fmt *fmt_info)
 {
-	if (unlikely(!dpp))
-		return false;
 
-	if (dpp->hdr.state.eotf_lut || dpp->hdr.state.oetf_lut ||
-				dpp->hdr.state.gm || dpp->hdr.state.tm)
+	if (fmt_info && (fmt_info->fmt == DRM_FORMAT_ARGB16161616F ||
+			fmt_info->fmt == DRM_FORMAT_ABGR16161616F))
 		return true;
 
 	return false;
+}
+
+bool dpp_need_enable_hdr(const struct dpp_device *dpp)
+{
+	bool hdr_en;
+
+	if (unlikely(!dpp))
+		return false;
+
+	hdr_en = (dpp->hdr.state.eotf_lut || dpp->hdr.state.oetf_lut ||
+			dpp->hdr.state.gm || dpp->hdr.state.tm);
+	if (hdr_en) {
+		/*
+		 * In ZUMA, when enabling HDR, need to enable EOTF or FP16/FP16_CVT. Otherwise HDR
+		 * engine canʼt work normally cause DPU stuck.
+		 */
+		const struct dpu_fmt *fmt_info = dpu_find_fmt_info(dpp->win_config.format);
+
+		if (!is_fmt_fp16(fmt_info) && !dpp->hdr.state.eotf_lut) {
+			printk_ratelimited(
+				"DPP%u: when enabling HDR, EOTF_EN need to be set(GM %s TM %s OETF %s)\n",
+				dpp->id,
+				dpp->hdr.state.gm ? "on" : "off",
+				dpp->hdr.state.tm ? "on" : "off",
+				dpp->hdr.state.oetf_lut ? "on" : "off");
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+			hdr_en = false;
+#endif
+		} else if (is_fmt_fp16(fmt_info) &&
+				!(dpp->hdr.fp16_en || dpp->hdr.fp16_cvt_en)) {
+			printk_ratelimited(
+				"DPP%u: when enabling HDR for FP16, FP16 or CVT need to be set(GM %s TM %s OETF %s)\n",
+				dpp->id,
+				dpp->hdr.state.gm ? "on" : "off",
+				dpp->hdr.state.tm ? "on" : "off",
+				dpp->hdr.state.oetf_lut ? "on" : "off");
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+			hdr_en = false;
+#endif
+		}
+	}
+
+	return hdr_en;
 }
 
 static dma_addr_t dpp_alloc_map_buf_test(void)

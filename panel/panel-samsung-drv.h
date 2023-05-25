@@ -59,6 +59,7 @@
 #define PANEL_REV_DVT1		BIT(9)
 #define PANEL_REV_DVT1_1	BIT(10)
 #define PANEL_REV_PVT		BIT(11)
+#define PANEL_REV_MP		BIT(12)
 #define PANEL_REV_LATEST	BIT(31)
 #define PANEL_REV_ALL		(~0)
 #define PANEL_REV_GE(rev)	(~((rev) - 1))
@@ -477,6 +478,14 @@ struct exynos_panel_funcs {
 	 */
 	unsigned int (*get_te_usec)(struct exynos_panel *exynos_panel,
 				    const struct exynos_panel_mode *pmode);
+
+	/**
+	 * @run_normal_mode_work
+	 *
+	 * This callback is used to run the periodic work for each panel in
+	 * normal mode.
+	 */
+	void (*run_normal_mode_work)(struct exynos_panel *exynos_panel);
 };
 
 /**
@@ -593,6 +602,7 @@ struct exynos_panel_desc {
 	const struct panel_reg_ctrl reg_ctrl_post_enable[PANEL_REG_COUNT];
 	const struct panel_reg_ctrl reg_ctrl_pre_disable[PANEL_REG_COUNT];
 	const struct panel_reg_ctrl reg_ctrl_disable[PANEL_REG_COUNT];
+	const u32 normal_mode_work_delay_ms;
 };
 
 #define PANEL_ID_MAX		40
@@ -630,6 +640,7 @@ struct te2_data {
 struct exynos_panel {
 	struct device *dev;
 	struct drm_panel panel;
+	struct drm_crtc *crtc;
 	struct dentry *debugfs_entry;
 	struct dentry *debugfs_cmdset_entry;
 	struct gpio_desc *reset_gpio;
@@ -695,6 +706,7 @@ struct exynos_panel {
 	enum exynos_cabc_mode cabc_mode;
 	struct backlight_device *bl;
 	struct mutex mode_lock;
+	struct mutex crtc_lock;
 	struct mutex bl_state_lock;
 	struct exynos_bl_notifier bl_notifier;
 
@@ -762,6 +774,9 @@ struct exynos_panel {
 
 	u32 error_count_te;
 	u32 error_count_unknown;
+
+	u32 normal_mode_work_delay_ms;
+	struct delayed_work normal_mode_work;
 };
 
 /**
@@ -1015,6 +1030,10 @@ static inline bool is_local_hbm_disabled(struct exynos_panel *ctx)
 	i > 0;										\
 	i--, data++)									\
 
+#define EXYNOS_VREFRESH_TO_PERIOD_USEC(rate) DIV_ROUND_UP(USEC_PER_SEC, (rate) ? (rate) : 60)
+
+int exynos_panel_wait_for_vblank(struct exynos_panel *ctx);
+void exynos_panel_wait_for_vsync_done(struct exynos_panel *ctx, u32 te_us, u32 period_us);
 unsigned int panel_get_idle_time_delta(struct exynos_panel *ctx);
 int exynos_panel_configure_te2_edges(struct exynos_panel *ctx,
 				     u32 *timings, bool lp_mode);

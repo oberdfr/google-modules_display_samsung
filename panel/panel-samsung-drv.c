@@ -80,6 +80,17 @@ static inline bool is_backlight_lp_state(const struct backlight_device *bl)
 	return (bl->props.state & BL_STATE_LP) != 0;
 }
 
+static struct drm_crtc *get_exynos_panel_connector_crtc(struct exynos_panel *ctx)
+{
+	struct drm_crtc *crtc = NULL;
+
+	mutex_lock(&ctx->crtc_lock);
+	crtc = ctx->crtc;
+	mutex_unlock(&ctx->crtc_lock);
+
+	return crtc;
+}
+
 int exynos_panel_configure_te2_edges(struct exynos_panel *ctx,
 				     u32 *timings, bool lp_mode)
 {
@@ -372,6 +383,9 @@ void exynos_panel_get_panel_rev(struct exynos_panel *ctx, u8 rev)
 	case 0x10:
 		ctx->panel_rev = PANEL_REV_PVT;
 		break;
+	case 0x14:
+		ctx->panel_rev = PANEL_REV_MP;
+		break;
 	default:
 		dev_warn(ctx->dev,
 			 "unknown rev from panel (0x%x), default to latest\n",
@@ -448,6 +462,12 @@ int exynos_panel_init(struct exynos_panel *ctx)
 
 	if (funcs && funcs->panel_init)
 		funcs->panel_init(ctx);
+
+	if (funcs && funcs->run_normal_mode_work) {
+		dev_info(ctx->dev, "%s: schedule normal_mode_work\n", __func__);
+		schedule_delayed_work(&ctx->normal_mode_work,
+				      msecs_to_jiffies(ctx->normal_mode_work_delay_ms));
+	}
 
 	return ret;
 }
@@ -2360,6 +2380,8 @@ static int panel_debugfs_add(struct exynos_panel *ctx, struct dentry *parent)
 	debugfs_create_u32("rev", 0600, parent, &ctx->panel_rev);
 	debugfs_create_bool("lhbm_postwork_disabled", 0600, parent,
 			    &ctx->hbm.local_hbm.post_work_disabled);
+	debugfs_create_u32("normal_mode_work_delay_ms", 0600, parent,
+			   &ctx->normal_mode_work_delay_ms);
 
 	if (!funcs)
 		return -EINVAL;
@@ -2873,19 +2895,6 @@ static ssize_t dimming_on_show(struct device *dev,
 	return scnprintf(buf, PAGE_SIZE, "%d\n", ctx->dimming_on);
 }
 static DEVICE_ATTR_RW(dimming_on);
-
-static struct drm_crtc *get_exynos_panel_connector_crtc(struct exynos_panel *ctx)
-{
-	struct drm_mode_config *config;
-	struct drm_crtc *crtc = NULL;
-
-	config = &ctx->exynos_connector.base.dev->mode_config;
-	drm_modeset_lock(&config->connection_mutex, NULL);
-	if (ctx->exynos_connector.base.state)
-		crtc = ctx->exynos_connector.base.state->crtc;
-	drm_modeset_unlock(&config->connection_mutex);
-	return crtc;
-}
 
 static ssize_t local_hbm_mode_store(struct device *dev,
 			       struct device_attribute *attr,
@@ -3456,6 +3465,12 @@ static void exynos_panel_bridge_enable(struct drm_bridge *bridge,
 	const bool is_lp_mode = ctx->current_mode &&
 				ctx->current_mode->exynos_mode.is_lp_mode;
 
+	if (ctx->exynos_connector.base.state) {
+		mutex_lock(&ctx->crtc_lock);
+		ctx->crtc = ctx->exynos_connector.base.state->crtc;
+		mutex_unlock(&ctx->crtc_lock);
+	}
+
 	mutex_lock(&ctx->mode_lock);
 	if (ctx->panel_state == PANEL_STATE_HANDOFF) {
 		is_active = !exynos_panel_init(ctx);
@@ -3501,6 +3516,13 @@ static void exynos_panel_bridge_enable(struct drm_bridge *bridge,
 
 	if (need_update_backlight && ctx->bl)
 		backlight_update_status(ctx->bl);
+
+	if (!is_active && ctx->desc->exynos_panel_func &&
+	    ctx->desc->exynos_panel_func->run_normal_mode_work) {
+		dev_info(ctx->dev, "%s: schedule normal_mode_work\n", __func__);
+		schedule_delayed_work(&ctx->normal_mode_work,
+				      msecs_to_jiffies(ctx->normal_mode_work_delay_ms));
+	}
 }
 
 /*
@@ -3592,9 +3614,19 @@ static void exynos_panel_bridge_disable(struct drm_bridge *bridge,
 			ctx->panel_state = PANEL_STATE_BLANK;
 		} else {
 			ctx->panel_state = PANEL_STATE_OFF;
+
+			if (ctx->desc->exynos_panel_func &&
+			    ctx->desc->exynos_panel_func->run_normal_mode_work) {
+				dev_info(ctx->dev, "%s: cancel normal_mode_work\n", __func__);
+				cancel_delayed_work(&ctx->normal_mode_work);
+			}
 		}
 
 		drm_panel_disable(&ctx->panel);
+
+		mutex_lock(&ctx->crtc_lock);
+		ctx->crtc = NULL;
+		mutex_unlock(&ctx->crtc_lock);
 	}
 }
 
@@ -3621,33 +3653,88 @@ static u64 exynos_panel_vsync_start_time_us(u32 te_us, u32 te_period_us)
 	return te_period_us * 55 / 100;
 }
 
+int exynos_panel_wait_for_vblank(struct exynos_panel *ctx)
+{
+	struct drm_crtc *crtc = NULL;
+
+	if (ctx->exynos_connector.base.state)
+		crtc = ctx->exynos_connector.base.state->crtc;
+
+	if (crtc && !drm_crtc_vblank_get(crtc)) {
+		drm_crtc_wait_one_vblank(crtc);
+		drm_crtc_vblank_put(crtc);
+		return 0;
+	}
+
+	WARN_ON(1);
+	return -ENODEV;
+}
+EXPORT_SYMBOL(exynos_panel_wait_for_vblank);
+
+void exynos_panel_wait_for_vsync_done(struct exynos_panel *ctx, u32 te_us, u32 period_us)
+{
+	u32 delay_us;
+
+	if (unlikely(exynos_panel_wait_for_vblank(ctx))) {
+		delay_us = period_us + 1000;
+		usleep_range(delay_us, delay_us + 10);
+		return;
+	}
+
+	delay_us = exynos_panel_vsync_start_time_us(te_us, period_us);
+	usleep_range(delay_us, delay_us + 10);
+}
+EXPORT_SYMBOL(exynos_panel_wait_for_vsync_done);
+
+static u32 get_rr_switch_applied_te_count(struct exynos_panel *ctx)
+{
+	/* New refresh rate should take effect immediately after exiting AOD mode */
+	if (ctx->last_rr_switch_ts == ctx->last_lp_exit_ts)
+		return 1;
+
+	/* New rr will take effect at the first vsync after sending rr command, but
+	 * we only know te rising ts. The worse case, new rr take effect at 2nd TE.
+	 */
+	return 2;
+}
+
+static bool is_last_rr_applied(struct exynos_panel *ctx, ktime_t last_te)
+{
+	s64 rr_switch_delta_us;
+	u32 te_period_before_rr_switch_us;
+	u32 rr_switch_applied_te_count;
+
+	if (last_te == 0)
+		return false;
+
+	rr_switch_delta_us = ktime_us_delta(last_te, ctx->last_rr_switch_ts);
+	te_period_before_rr_switch_us = ctx->last_rr != 0 ? USEC_PER_SEC / ctx->last_rr : 0;
+	rr_switch_applied_te_count = get_rr_switch_applied_te_count(ctx);
+
+	if (rr_switch_delta_us > ((rr_switch_applied_te_count - 1) *
+			te_period_before_rr_switch_us))
+		return true;
+
+	return false;
+}
+
 /* avoid accumulate te varaince cause predicted value is not precision enough */
 #define ACCEPTABLE_TE_PERIOD_DETLA_NS		(3 * NSEC_PER_SEC)
 #define ACCEPTABLE_TE_RR_SWITCH_DELTA_US	(500)
 static ktime_t exynos_panel_te_ts_prediction(struct exynos_panel *ctx, ktime_t last_te,
 					     u32 te_period_us)
 {
-	const struct exynos_panel_desc *desc = ctx->desc;
 	s64 rr_switch_delta_us, te_last_rr_switch_delta_us;
 	u32 te_period_before_rr_switch_us;
 	u32 rr_switch_applied_te_count;
 	s64 te_period_delta_ns;
 
-	if (!desc || last_te == 0)
+	if (last_te == 0)
 		return 0;
 
 	rr_switch_delta_us = ktime_us_delta(last_te, ctx->last_rr_switch_ts);
 	te_period_before_rr_switch_us = ctx->last_rr != 0 ? USEC_PER_SEC / ctx->last_rr : 0;
-
-	if (ctx->last_rr_switch_ts == ctx->last_lp_exit_ts) {
-		/* New refresh rate should take effect immediately after exiting AOD mode */
-		rr_switch_applied_te_count = 1;
-	} else {
-		/* New rr will take effect at the first vsync after sending rr command, but we
-		 * only know te rising ts. The worse case, new rr take effect at 2nd TE
-		 */
-		rr_switch_applied_te_count = 2;
-	}
+	rr_switch_applied_te_count = get_rr_switch_applied_te_count(ctx);
 
 	if (rr_switch_delta_us < 0 && te_period_before_rr_switch_us != 0) {
 		/* last know TE ts is before sending last rr switch */
@@ -3693,8 +3780,7 @@ static ktime_t exynos_panel_te_ts_prediction(struct exynos_panel *ctx, ktime_t l
 				return first_te_after_rr_switch;
 			}
 		}
-	} else if (rr_switch_delta_us > ((rr_switch_applied_te_count - 1) *
-			te_period_before_rr_switch_us)) {
+	} else if (is_last_rr_applied(ctx, last_te)) {
 		/* new rr has already taken effect at last know TE ts */
 		ktime_t now;
 		s64 since_last_te_us;
@@ -3758,9 +3844,12 @@ static void exynos_panel_check_mipi_sync_timing(struct drm_crtc *crtc,
 	retry = te_period_us / USEC_PER_MSEC + 1;
 
 	do {
+		u32 cur_te_period_us = te_period_us;
+		u32 cur_te_usec = te_usec;
 		ktime_t last_te = 0, now;
 		s64 since_last_te_us;
 		u64 vblank_counter;
+		bool last_rr_applied;
 
 		vblank_counter = drm_crtc_vblank_count_and_time(crtc, &last_te);
 		now = ktime_get();
@@ -3781,21 +3870,22 @@ static void exynos_panel_check_mipi_sync_timing(struct drm_crtc *crtc,
 		 * new rr or for old rr depending on if last rr is sent at TE high or low.
 		 * If the refresh rate switch happens after last_te, last TE width won't change.
 		 */
+		last_rr_applied = is_last_rr_applied(ctx, last_te);
 		if (ctx->last_rr != 0 && ((vblank_counter - ctx->last_rr_te_counter <= 1 &&
-					   ctx->last_rr_te_gpio_value == 0) ||
+					   ctx->last_rr_te_gpio_value == 0 && !last_rr_applied) ||
 					  ktime_after(ctx->last_rr_switch_ts, last_te))) {
-			te_period_us = USEC_PER_SEC / ctx->last_rr;
-			te_usec = ctx->last_rr_te_usec;
+			cur_te_period_us = USEC_PER_SEC / ctx->last_rr;
+			cur_te_usec = ctx->last_rr_te_usec;
 		}
-		left = exynos_panel_vsync_start_time_us(te_usec, te_period_us);
-		right = te_period_us - USEC_PER_MSEC;
+		left = exynos_panel_vsync_start_time_us(cur_te_usec, cur_te_period_us);
+		right = cur_te_period_us - USEC_PER_MSEC;
 		pr_debug(
 			"%s: rr-te: %lld, te-now: %lld, time window [%llu, %llu] te/pulse: %u/%u\n",
 			__func__, ktime_us_delta(last_te, ctx->last_rr_switch_ts),
-			ktime_us_delta(now, last_te), left, right, te_period_us, te_usec);
+			ktime_us_delta(now, last_te), left, right, cur_te_period_us, cur_te_usec);
 
 		/* Only use the most recent TE as a reference point if it's not obsolete */
-		if (since_last_te_us > te_period_us) {
+		if (since_last_te_us > cur_te_period_us) {
 			DPU_ATRACE_BEGIN("time_window_wait_crtc");
 			if (vblank_taken || !drm_crtc_vblank_get(crtc)) {
 				drm_crtc_wait_one_vblank(crtc);
@@ -4040,6 +4130,21 @@ static void exynos_panel_bridge_mode_set(struct drm_bridge *bridge,
 	if (need_update_backlight && ctx->bl)
 		backlight_update_status(ctx->bl);
 
+	/* we don't run normal_mode_work in LP mode */
+	if (funcs && funcs->run_normal_mode_work) {
+		if (pmode->exynos_mode.is_lp_mode) {
+			dev_info(ctx->dev, "%s: cancel normal_mode_work while entering LP mode\n",
+				 __func__);
+			cancel_delayed_work(&ctx->normal_mode_work);
+		} else if (old_mode && old_mode->exynos_mode.is_lp_mode &&
+			   ctx->panel_state == PANEL_STATE_NORMAL) {
+			dev_info(ctx->dev, "%s: schedule normal_mode_work while exiting LP mode\n",
+				 __func__);
+			schedule_delayed_work(&ctx->normal_mode_work,
+					      msecs_to_jiffies(ctx->normal_mode_work_delay_ms));
+		}
+	}
+
 	DPU_ATRACE_INT("panel_fps", drm_mode_vrefresh(mode));
 	DPU_ATRACE_END(__func__);
 }
@@ -4165,6 +4270,18 @@ static void local_hbm_post_work(struct kthread_work *work)
 	if (crtc)
 		drm_crtc_vblank_put(crtc);
 	DPU_ATRACE_END(__func__);
+}
+
+static void exynos_panel_normal_mode_work(struct work_struct *work)
+{
+	struct exynos_panel *ctx = container_of(work, struct exynos_panel, normal_mode_work.work);
+
+	dev_info(ctx->dev, "%s\n", __func__);
+	mutex_lock(&ctx->mode_lock);
+	ctx->desc->exynos_panel_func->run_normal_mode_work(ctx);
+	mutex_unlock(&ctx->mode_lock);
+	schedule_delayed_work(&ctx->normal_mode_work,
+			      msecs_to_jiffies(ctx->normal_mode_work_delay_ms));
 }
 
 static void hbm_data_init(struct exynos_panel *ctx)
@@ -4421,7 +4538,14 @@ int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 	ctx->panel_idle_enabled = exynos_panel_func && exynos_panel_func->set_self_refresh != NULL;
 	INIT_DELAYED_WORK(&ctx->idle_work, panel_idle_work);
 
+	if (exynos_panel_func && exynos_panel_func->run_normal_mode_work &&
+	    ctx->desc->normal_mode_work_delay_ms) {
+		ctx->normal_mode_work_delay_ms = ctx->desc->normal_mode_work_delay_ms;
+		INIT_DELAYED_WORK(&ctx->normal_mode_work, exynos_panel_normal_mode_work);
+	}
+
 	mutex_init(&ctx->mode_lock);
+	mutex_init(&ctx->crtc_lock);
 	mutex_init(&ctx->bl_state_lock);
 	mutex_init(&ctx->lp_state_lock);
 
