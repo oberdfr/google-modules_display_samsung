@@ -79,12 +79,30 @@ static void dqe_reg_set_atc_ibsi(u32 dqe_id, u32 width, u32 height)
 			ATC_IBSI_X_P2(ibsi_x) | ATC_IBSI_Y_P2(ibsi_y));
 }
 
+static void dqe_reg_set_atc_cdf(u32 dqe_id, u32 width, u32 height)
+{
+	u32 cdf_shift, cdf_div, tmp;
+
+	tmp = (481 * width * height)/ (255 * (1 << 14));
+	if (tmp & (tmp - 1))
+		cdf_shift = fls(tmp);
+	else
+		cdf_shift = fls(tmp) - 1;
+
+	cdf_div = ((1 << 14) / ((width * height) >> cdf_shift)) * 255;
+
+	tmp = (ATC_CDF_SHIFT(cdf_shift) & ATC_CDF_SHIFT_MASK) |
+			(ATC_CDF_DIV(cdf_div) & ATC_CDF_DIV_MASK);
+	dqe_write(dqe_id, DQE_ATC_CDF_DIV, tmp);
+}
+
 /* exposed to driver layer for DQE CAL APIs */
 void dqe_reg_init(u32 dqe_id, u32 width, u32 height)
 {
 	dqe_reg_set_img_size(dqe_id, width, height);
 	dqe_reg_set_full_img_size(dqe_id, width, height);
 	dqe_reg_set_atc_ibsi(dqe_id, width, height);
+	dqe_reg_set_atc_cdf(dqe_id, width, height);
 	cal_log_debug(0, "size(%ux%u)\n", width, height);
 }
 
@@ -561,7 +579,12 @@ void dqe_reg_set_atc(u32 dqe_id, const struct exynos_atc *atc)
 		ATC_ONE_DITHER(atc->dither);
 	dqe_write_relaxed(dqe_id, DQE_ATC_GAIN, val);
 
+
 	val = ATC_PL_W1(atc->pl_w1) | ATC_PL_W2(atc->pl_w2);
+	if(atc->la_w_on) {
+		val |= ATC_LA_W_ON(atc->la_w_on) | ATC_LA_W(atc->la_w) |
+			ATC_LT_CALC_MODE(atc->lt_calc_mode);
+	}
 	dqe_write_relaxed(dqe_id, DQE_ATC_WEIGHT, val);
 
 	dqe_write_relaxed(dqe_id, DQE_ATC_CTMODE, atc->ctmode);
@@ -585,7 +608,49 @@ void dqe_reg_set_atc(u32 dqe_id, const struct exynos_atc *atc)
 		ATC_LT_CALC_AB_SHIFT(atc->lt_calc_ab_shift);
 	dqe_write_relaxed(dqe_id, DQE_ATC_GAIN_LIMIT, val);
 
+	val = ATC_TARGET_DIM_RATIO(atc->dim_ratio);
+	dqe_write_relaxed(dqe_id, DQE_ATC_DIMMING_CONTROL, val);
+	dqe_reg_set_atc_he(dqe_id, atc);
+
 	dqe_write_mask(dqe_id, DQE_ATC_CONTROL, ~0, DQE_ATC_EN_MASK);
+}
+
+void dqe_reg_set_atc_he(u32 dqe_id, const struct exynos_atc *atc)
+{
+	/*Histogram Equalization*/
+	if (atc->gt_he_enable) {
+		u32 val;
+
+		val = ATC_GT_LAMDA_DSTEP(atc->gt_lamda_dstep) | ATC_GT_LAMDA(atc->gt_lamda);
+		dqe_write_relaxed(dqe_id, DQE_ATC_GT_CONTROL, val);
+		dqe_write_relaxed(dqe_id, DQE_ATC_HE_CLIP_MIN(0), atc->he_clip_min_0);
+		dqe_write_relaxed(dqe_id, DQE_ATC_HE_CLIP_MIN(1), atc->he_clip_min_1);
+		dqe_write_relaxed(dqe_id, DQE_ATC_HE_CLIP_MIN(2), atc->he_clip_min_2);
+		dqe_write_relaxed(dqe_id, DQE_ATC_HE_CLIP_MIN(3), atc->he_clip_min_3);
+		dqe_write_relaxed(dqe_id, DQE_ATC_HE_CLIP_MAX(0), atc->he_clip_max_0);
+		dqe_write_relaxed(dqe_id, DQE_ATC_HE_CLIP_MAX(1), atc->he_clip_max_1);
+		dqe_write_relaxed(dqe_id, DQE_ATC_HE_CLIP_MAX(2), atc->he_clip_max_2);
+		dqe_write_relaxed(dqe_id, DQE_ATC_HE_CLIP_MAX(3), atc->he_clip_max_3);
+	}
+	dqe_write_mask(dqe_id, DQE_ATC_GT_CONTROL, ATC_GT_HE_EN(atc->gt_he_enable), ATC_GT_HE_EN_MASK);
+}
+
+void dqe_reg_print_atc_he(u32 dqe_id, struct drm_printer *pr)
+{
+	u32 val, i;
+
+	val = dqe_read(dqe_id, DQE_ATC_GT_CONTROL);
+	cal_drm_printf(pr, 0 , "DQE_ATC_GT_CONTROL: %x\n", val);
+	val = dqe_read(dqe_id, DQE_ATC_CDF_DIV);
+	cal_drm_printf(pr, 0 , "DQE_ATC_CDF_DIV: %x\n", val);
+	for (i = 0; i < DQE_ATC_HE_CLIP_CNT; i++) {
+		val = dqe_read(dqe_id, DQE_ATC_HE_CLIP_MIN(i));
+		cal_drm_printf(pr, 0 , "DQE_ATC_HE_CLIP_MIN[%d]: %x\n", i, val);
+	}
+	for (i = 0; i < DQE_ATC_HE_CLIP_CNT; i++) {
+		val = dqe_read(dqe_id, DQE_ATC_HE_CLIP_MAX(i));
+		cal_drm_printf(pr, 0 , "DQE_ATC_HE_CLIP_MAX[%d]: %x\n", i, val);
+	}
 }
 
 static void dqe_reg_print_dump(u32 dqe_id, u32 start, u32 count, const u32 offset,
@@ -623,7 +688,8 @@ void dqe_reg_print_atc(u32 dqe_id, struct drm_printer *p)
 		return;
 
 	cal_drm_printf(p, 0, "ATC configuration\n");
-	dqe_reg_print_dump(dqe_id, DQE_ATC_CONTROL, 16, 0, p);
+	dqe_reg_print_dump(dqe_id, DQE_ATC_CONTROL, 27, 0, p);
+	dqe_reg_print_atc_he(dqe_id, p);
 }
 
 void dqe_reg_save_lpd_atc(u32 dqe_id, u32 *lpd_atc_regs)
@@ -710,7 +776,7 @@ void dqe_reg_set_histogram(u32 dqe_id, enum exynos_histogram_id hist_id, enum hi
 	hist_write_mask(dqe_id, DQE_HIST(hist_id), val, HIST_EN | HIST_ROI_ON);
 }
 
-void dqe_reg_get_histogram_bins(u32 dqe_id, enum exynos_histogram_id hist_id,
+void dqe_reg_get_histogram_bins(struct device *dev, u32 dqe_id, enum exynos_histogram_id hist_id,
 				struct histogram_bins *bins)
 {
 	int regs_cnt = DIV_ROUND_UP(HISTOGRAM_BIN_COUNT, 2);
@@ -718,19 +784,25 @@ void dqe_reg_get_histogram_bins(u32 dqe_id, enum exynos_histogram_id hist_id,
 	u32 val;
 	u16 dqe_channel = (dqe_id & 0xff << 8) | (hist_id & 0xff);
 	phys_addr_t pa;
+	dma_addr_t dma_addr;
 
 	if (hist_id >= HISTOGRAM_MAX)
 		return;
 
 	/*
 	 * note: we rely on bins being backed by physical memory allocation
-	 * since it's part of the dev structure allocated as devm_kzalloc(see drm_dqe.c)
 	 */
 	pa = virt_to_phys(bins);
-	i = (int)exynos_smc(SMC_DRM_HISTOGRAM_BINS_SEC, dqe_channel, pa, sizeof(*bins));
-	rmb();
-	if (!i)
-		return;
+	dma_addr = dma_map_single(dev, bins, sizeof(*bins), DMA_FROM_DEVICE);
+	if (!dma_mapping_error(dev, dma_addr)) {
+		i = (int)exynos_smc(SMC_DRM_HISTOGRAM_BINS_SEC, dqe_channel, pa, sizeof(*bins));
+		dma_unmap_single(dev, dma_addr, sizeof(*bins), DMA_FROM_DEVICE);
+		rmb();
+		if (!i)
+			return;
+	} else {
+		printk_ratelimited(KERN_ERR "dqe(%d): dma_map_single failed\n", dqe_id);
+	}
 
 	/* fallback into per-register queries */
 	for (i = 0; i < regs_cnt; ++i) {
@@ -738,7 +810,6 @@ void dqe_reg_get_histogram_bins(u32 dqe_id, enum exynos_histogram_id hist_id,
 		bins->data[i * 2] = HIST_BIN_L_GET(val);
 		bins->data[i * 2 + 1] = HIST_BIN_H_GET(val);
 	}
-
 	rmb();
 }
 

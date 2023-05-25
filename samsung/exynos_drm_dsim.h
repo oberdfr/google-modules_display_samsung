@@ -72,6 +72,7 @@ struct dsim_device {
 	struct device *dev;
 	struct drm_bridge *panel_bridge;
 	struct mipi_dsi_device *dsi_device;
+	struct mipi_dsi_device_info dsi_device_info;
 	struct device_link *dev_link;
 
 	enum exynos_drm_output_type output_type;
@@ -115,6 +116,7 @@ struct dsim_device {
 	int idle_ip_index;
 	u8 total_pend_ph;
 	u16 total_pend_pl;
+	u32 tx_delay_ms;
 	/* override message flag ~EXYNOS_DSI_MSG_QUEUE */
 	bool force_batching;
 
@@ -163,6 +165,8 @@ dsim_get_decon(const struct dsim_device *dsim)
 
 	return to_exynos_crtc(crtc)->ctx;
 }
+
+inline void dsim_trace_msleep(u32 delay_ms);
 
 #ifdef CONFIG_DEBUG_FS
 void dsim_diag_create_debugfs(struct dsim_device *dsim);

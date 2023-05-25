@@ -121,6 +121,13 @@ MODULE_DEVICE_TABLE(of, dsim_of_match);
 static int dsim_calc_underrun(const struct dsim_device *dsim, uint32_t hs_clock_mhz,
 		uint32_t *underrun);
 
+inline void dsim_trace_msleep(u32 delay_ms)
+{
+	trace_msleep(delay_ms);
+	usleep_range(delay_ms * 1000, delay_ms * 1000 + 10);
+}
+EXPORT_SYMBOL(dsim_trace_msleep);
+
 static struct drm_crtc *drm_encoder_get_new_crtc(struct drm_encoder *encoder,
 						 struct drm_atomic_state *state)
 {
@@ -1287,9 +1294,7 @@ static const struct drm_encoder_funcs dsim_encoder_funcs = {
 static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 	const char *pname, enum panel_priority_index idx)
 {
-	struct mipi_dsi_device_info info = {
-		.node = NULL,
-	};
+	struct mipi_dsi_device_info *info = &dsim->dsi_device_info;
 	struct device_node *node;
 	const char *name;
 	const char *dual_dsi;
@@ -1301,6 +1306,8 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 
 	dsim_debug(dsim, "preferred panel is %.*s\n", cmp_len, pname);
 
+	info->node = NULL;
+
 	for_each_available_child_of_node(dsim->dsi_host.dev->of_node, node) {
 		bool found;
 
@@ -1309,8 +1316,8 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 		 * abort panel detection in that case
 		 */
 		if (of_find_property(node, "reg", NULL)) {
-			if (info.node)
-				of_node_put(info.node);
+			if (info->node)
+				of_node_put(info->node);
 
 			return -ENODEV;
 		}
@@ -1319,10 +1326,10 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 		 * We already detected panel we want but keep iterating
 		 * in case there are devices with reg property
 		 */
-		if (info.node)
+		if (info->node)
 			continue;
 
-		if (of_property_read_u32(node, "channel", &info.channel))
+		if (of_property_read_u32(node, "channel", &info->channel))
 			continue;
 
 		name = of_get_property(node, "label", NULL);
@@ -1337,16 +1344,16 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 			 * index in the panel name, i.e. "priority-index:panel-name"
 			 */
 			if (found && idx > PANEL_PRIORITY_PRI_IDX)
-				scnprintf(info.type, sizeof(info.type),
+				scnprintf(info->type, sizeof(info->type),
 					"%d:%s", idx, name);
 			else
-				strlcpy(info.type, name, sizeof(info.type));
-			info.node = of_node_get(node);
+				strlcpy(info->type, name, sizeof(info->type));
+			info->node = of_node_get(node);
 		}
 	}
 
-	if (info.node) {
-		if (!of_property_read_string(info.node, "dual-dsi", &dual_dsi)) {
+	if (info->node) {
+		if (!of_property_read_string(info->node, "dual-dsi", &dual_dsi)) {
 			if (!strcmp(dual_dsi, "main"))
 				dsim->dual_dsi = DSIM_DUAL_DSI_MAIN;
 			else if (!strcmp(dual_dsi, "sec"))
@@ -1354,11 +1361,10 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 			else
 				dsim->dual_dsi = DSIM_DUAL_DSI_NONE;
 		}
-		if (dsim->dual_dsi != DSIM_DUAL_DSI_SEC)
-			mipi_dsi_device_register_full(&dsim->dsi_host, &info);
 
 		if (dsim->dual_dsi == DSIM_DUAL_DSI_NONE)
 			panel_usage |= BIT(idx);
+
 		return 0;
 	}
 
@@ -1455,6 +1461,7 @@ static int dsim_bind(struct device *dev, struct device *master, void *data)
 		return -ENOTSUPP;
 	}
 
+	mipi_dsi_device_register_full(&dsim->dsi_host, &dsim->dsi_device_info);
 	ret = mipi_dsi_host_register(&dsim->dsi_host);
 
 	dsim_debug(dsim, "%s -\n", __func__);
@@ -2120,7 +2127,8 @@ static int dsim_write_data_locked(struct dsim_device *dsim, const struct mipi_ds
 		is_last = true;
 	}
 
-	trace_dsi_tx(msg->type, msg->tx_buf, msg->tx_len, is_last);
+	/* TODO(b/278175371): print actual delay time */
+	trace_dsi_tx(msg->type, msg->tx_buf, msg->tx_len, is_last, dsim->tx_delay_ms);
 	dsim_debug(dsim, "%s last command\n", is_last ? "" : "Not");
 
 	if (is_last) {
@@ -2153,14 +2161,14 @@ dsim_req_read_command(struct dsim_device *dsim, const struct mipi_dsi_msg *msg)
 
 	dsim_reg_clear_int(dsim->id, DSIM_INTSRC_SFR_PH_FIFO_EMPTY);
 	reinit_completion(&dsim->ph_wr_comp);
-	trace_dsi_tx(MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE, &rx_len, 1, true);
+	trace_dsi_tx(MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE, &rx_len, 1, true, 0);
 	/* set the maximum packet size returned */
 	dsim_reg_wr_tx_header(dsim->id, MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE,
 			msg->rx_len, 0, false);
 
 	/* read request */
 	mipi_dsi_create_packet(&packet, msg);
-	trace_dsi_tx(msg->type, msg->tx_buf, msg->tx_len, true);
+	trace_dsi_tx(msg->type, msg->tx_buf, msg->tx_len, true, 0);
 	dsim_reg_wr_tx_header(dsim->id, packet.header[0], packet.header[1],
 						packet.header[2], true);
 

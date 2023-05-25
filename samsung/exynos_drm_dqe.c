@@ -116,7 +116,6 @@ int histogram_request_ioctl(struct drm_device *dev, void *data,
 		return -ENODEV;
 	}
 
-
 	e = create_histogram_event(dev, file);
 	if (IS_ERR(e)) {
 		pr_err("failed to create a histogram event\n");
@@ -209,39 +208,22 @@ int histogram_chan_configure(struct exynos_dqe *dqe, const enum exynos_histogram
 	return 0;
 }
 
-int histogram_chan_start(struct exynos_dqe *dqe, const enum exynos_histogram_id hist_id,
-			 const enum histogram_state hist_state, histogram_chan_callback hist_cb)
+int histogram_chan_set_state(struct exynos_dqe *dqe, const enum exynos_histogram_id hist_id,
+			     const enum histogram_state hist_state,
+			     histogram_chan_callback hist_cb)
 {
 	struct decon_device *decon = dqe->decon;
 	u32 id = decon->id;
-
-	pr_debug("decon_id=%u, hist_id=%d hist_state=%d, curr_state=%d\n", id, hist_id, hist_state,
-		 dqe->state.hist_chan[hist_id].hist_state);
 
 	if (!dqe || hist_id >= HISTOGRAM_MAX)
 		return -EINVAL;
 
+	pr_debug("decon_id=%u, hist_id=%d hist_state=%d, curr_state=%d\n",
+		 id, hist_id, hist_state, dqe->state.hist_chan[hist_id].hist_state);
+
 	dqe->state.hist_chan[hist_id].hist_cb = hist_cb;
 	dqe->state.hist_chan[hist_id].hist_state = hist_state;
 	dqe_reg_set_histogram(id, hist_id, hist_state);
-
-	return 0;
-}
-
-int histogram_chan_stop(struct exynos_dqe *dqe, const enum exynos_histogram_id hist_id)
-{
-	struct decon_device *decon = dqe->decon;
-	u32 id = decon->id;
-
-	if (hist_id >= HISTOGRAM_MAX)
-		return -EINVAL;
-
-	if (dqe->state.hist_chan[hist_id].hist_state == HISTOGRAM_OFF)
-		return 0;
-
-	dqe->state.hist_chan[hist_id].hist_cb = NULL;
-	dqe->state.hist_chan[hist_id].hist_state = HISTOGRAM_OFF;
-	dqe_reg_set_histogram(id, hist_id, HISTOGRAM_OFF);
 
 	return 0;
 }
@@ -265,7 +247,8 @@ void handle_histogram_event(struct exynos_dqe *dqe)
 			continue;
 
 		pr_debug("collect dqe%d channel%d histogram\n", id, hist_id);
-		dqe_reg_get_histogram_bins(id, hist_id, &dqe->state.hist_chan[hist_id].hist_bins);
+		dqe_reg_get_histogram_bins(dqe->dev, id, hist_id,
+					   &dqe->state.hist_chan[hist_id].hist_bins);
 		if (hist_cb)
 			(hist_cb)(id, hist_id, &dqe->state.hist_chan[hist_id].hist_bins);
 	}
@@ -493,8 +476,8 @@ static void exynos_lhbm_histogram_update(struct decon_device *decon)
 
 	histogram_chan_configure(decon->dqe, HISTOGRAM_CHAN_LHBM, &decon->dqe->lhbm_hist_config,
 				 flags);
-	histogram_chan_start(decon->dqe, HISTOGRAM_CHAN_LHBM, HISTOGRAM_ROI,
-			     exynos_lhbm_histogram_callback);
+	histogram_chan_set_state(decon->dqe, HISTOGRAM_CHAN_LHBM, HISTOGRAM_ROI,
+				 exynos_lhbm_histogram_callback);
 }
 #endif
 
@@ -537,7 +520,7 @@ static void exynos_histogram_update(struct exynos_dqe *dqe, struct exynos_dqe_st
 	else
 		hist_state = HISTOGRAM_OFF;
 
-	histogram_chan_start(dqe, hist_id, hist_state, NULL);
+	histogram_chan_set_state(dqe, hist_id, hist_state, NULL);
 #ifdef CONFIG_SOC_ZUMA
 	exynos_lhbm_histogram_update(decon);
 #endif
@@ -656,6 +639,7 @@ void exynos_dqe_update(struct exynos_dqe *dqe, struct exynos_dqe_state *state,
 
 void exynos_dqe_reset(struct exynos_dqe *dqe)
 {
+	int i;
 	dqe->initialized = false;
 	dqe->state.gamma_matrix = NULL;
 	dqe->state.degamma_lut = NULL;
@@ -666,13 +650,18 @@ void exynos_dqe_reset(struct exynos_dqe *dqe)
 	dqe->state.cgc_dither_config = NULL;
 	dqe->cgc.first_write = false;
 	dqe->force_atc_config.dirty = true;
-	dqe->state.histogram_threshold = 0;
-	dqe->state.histogram_pos = POST_DQE;
-	dqe->state.histogram_id = HISTOGRAM_0;
-	dqe->state.roi = NULL;
-	dqe->state.weights = NULL;
 	dqe->state.rcd_enabled = false;
 	dqe->state.cgc_gem = NULL;
+
+	/* reflect histogram state  */
+	dqe->state.histogram_pos = POST_DQE;
+	dqe->state.histogram_id = HISTOGRAM_0;
+	dqe->state.histogram_threshold = 1;
+	dqe->state.roi = NULL;
+	dqe->state.weights = NULL;
+	for (i = 0; i < HISTOGRAM_MAX; i++) {
+		dqe->state.hist_chan[i].hist_state = HISTOGRAM_OFF;
+	}
 }
 
 void exynos_dqe_save_lpd_data(struct exynos_dqe *dqe)
@@ -717,6 +706,23 @@ static void set_default_atc_config(struct exynos_atc *atc)
 	atc->threshold_3 = 0x1;
 	atc->gain_limit = 0x1FF;
 	atc->lt_calc_ab_shift = 0x1;
+	atc->dim_ratio = 0xFF;
+#ifdef CONFIG_SOC_ZUMA
+	atc->la_w_on = true;
+	atc->la_w = 0x4;
+	atc->lt_calc_mode = 0x0;
+	atc->gt_lamda_dstep = 0x4;
+	atc->gt_lamda = 0x100;
+	atc->gt_he_enable = false;
+	atc->he_clip_min_0 = 0x40302010;
+	atc->he_clip_min_1 = 0x80706050;
+	atc->he_clip_min_2 = 0xc0b0a090;
+	atc->he_clip_min_3 = 0xf0e0d0;
+	atc->he_clip_max_0 = 0xa99b8970;
+	atc->he_clip_max_1 = 0xd0c8bfb5;
+	atc->he_clip_max_2 = 0xebe5dfd8;
+	atc->he_clip_max_3 = 0xfbf6f1;
+#endif
 }
 
 static ssize_t
@@ -758,6 +764,20 @@ atc_bool_store(struct exynos_dqe *dqe, bool *val, const char *buf, size_t count)
 	return count;
 }
 
+static ssize_t
+atc_u32_store(struct exynos_dqe *dqe, u32 *val, const char *buf, size_t count)
+{
+	int ret;
+
+	ret = kstrtou32(buf, 0, val);
+	if (ret)
+		return ret;
+
+	dqe->force_atc_config.dirty = true;
+
+	return count;
+}
+
 #define DQE_ATC_ATTR_RW(_name, _save, _fmt)	\
 static ssize_t _name##_store(struct device *dev,	\
 		struct device_attribute *attr, const char *buf, size_t count) \
@@ -777,6 +797,7 @@ static DEVICE_ATTR_RW(_name)
 #define DQE_ATC_ATTR_U8_RW(_name) DQE_ATC_ATTR_RW(_name, atc_u8_store, "%u")
 #define DQE_ATC_ATTR_U16_RW(_name) DQE_ATC_ATTR_RW(_name, atc_u16_store, "%u")
 #define DQE_ATC_ATTR_BOOL_RW(_name) DQE_ATC_ATTR_RW(_name, atc_bool_store, "%d")
+#define DQE_ATC_ATTR_U32_RW(_name) DQE_ATC_ATTR_RW(_name, atc_u32_store, "%u")
 
 DQE_ATC_ATTR_BOOL_RW(en);
 DQE_ATC_ATTR_U8_RW(lt);
@@ -798,6 +819,23 @@ DQE_ATC_ATTR_U8_RW(threshold_2);
 DQE_ATC_ATTR_U8_RW(threshold_3);
 DQE_ATC_ATTR_U16_RW(gain_limit);
 DQE_ATC_ATTR_U8_RW(lt_calc_ab_shift);
+DQE_ATC_ATTR_U16_RW(dim_ratio);
+#ifdef CONFIG_SOC_ZUMA
+DQE_ATC_ATTR_BOOL_RW(la_w_on);
+DQE_ATC_ATTR_U8_RW(la_w);
+DQE_ATC_ATTR_BOOL_RW(lt_calc_mode);
+DQE_ATC_ATTR_U8_RW(gt_lamda_dstep);
+DQE_ATC_ATTR_U16_RW(gt_lamda);
+DQE_ATC_ATTR_BOOL_RW(gt_he_enable);
+DQE_ATC_ATTR_U32_RW(he_clip_min_0);
+DQE_ATC_ATTR_U32_RW(he_clip_min_1);
+DQE_ATC_ATTR_U32_RW(he_clip_min_2);
+DQE_ATC_ATTR_U32_RW(he_clip_min_3);
+DQE_ATC_ATTR_U32_RW(he_clip_max_0);
+DQE_ATC_ATTR_U32_RW(he_clip_max_1);
+DQE_ATC_ATTR_U32_RW(he_clip_max_2);
+DQE_ATC_ATTR_U32_RW(he_clip_max_3);
+#endif
 
 static ssize_t force_update_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
@@ -891,6 +929,23 @@ static struct attribute *atc_attrs[] = {
 	&dev_attr_threshold_3.attr,
 	&dev_attr_gain_limit.attr,
 	&dev_attr_lt_calc_ab_shift.attr,
+	&dev_attr_dim_ratio.attr,
+#ifdef CONFIG_SOC_ZUMA
+	&dev_attr_la_w_on.attr,
+	&dev_attr_la_w.attr,
+	&dev_attr_lt_calc_mode.attr,
+	&dev_attr_gt_lamda_dstep.attr,
+	&dev_attr_gt_lamda.attr,
+	&dev_attr_gt_he_enable.attr,
+	&dev_attr_he_clip_min_0.attr,
+	&dev_attr_he_clip_min_1.attr,
+	&dev_attr_he_clip_min_2.attr,
+	&dev_attr_he_clip_min_3.attr,
+	&dev_attr_he_clip_max_0.attr,
+	&dev_attr_he_clip_max_1.attr,
+	&dev_attr_he_clip_max_2.attr,
+	&dev_attr_he_clip_max_3.attr,
+#endif
 	NULL,
 };
 ATTRIBUTE_GROUPS(atc);
@@ -985,6 +1040,8 @@ struct exynos_dqe *exynos_dqe_register(struct decon_device *decon)
 
 	pr_info("display quality enhancer is supported(DQE_V%d)\n",
 			dqe_version + 1);
+
+	dma_coerce_mask_and_coherent(dqe->dev, DMA_BIT_MASK(64));
 
 	return dqe;
 }

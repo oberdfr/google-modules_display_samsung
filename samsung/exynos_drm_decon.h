@@ -197,6 +197,7 @@ enum dpu_event_type {
 	DPU_EVT_DECON_FRAMESTART,
 	DPU_EVT_DECON_RSC_OCCUPANCY,
 	DPU_EVT_DECON_TRIG_MASK,
+	DPU_EVT_DECON_UPDATE_CONFIG,
 
 	DPU_EVT_DSIM_ENABLED,
 	DPU_EVT_DSIM_DISABLED,
@@ -209,6 +210,7 @@ enum dpu_event_type {
 	DPU_EVT_DSIM_PL_FIFO_TIMEOUT,
 
 	DPU_EVT_DPP_FRAMEDONE,
+	DPU_EVT_DPP_SET_PROTECTION,
 	DPU_EVT_DMA_RECOVERY,
 
 	DPU_EVT_IDMA_AFBC_CONFLICT,
@@ -300,6 +302,8 @@ struct dpu_log_dpp {
 	u32 win_id;
 	u64 comp_src;
 	u32 recovery_cnt;
+	pid_t last_secure_pid; /* record last PID which wrote mst_security */
+	bool mst_security;
 };
 
 struct dpu_log_win {
@@ -334,6 +338,7 @@ struct dpu_log_crtc_info {
 	bool mode_changed;
 	bool active_changed;
 	bool self_refresh;
+	bool connectors_changed;
 };
 
 struct dpu_log_freqs {
@@ -385,8 +390,16 @@ struct dpu_log_plane_info {
 	u32 format;
 };
 
+struct dpu_log_decon_cfg {
+	u32 fps;
+	u32 image_width;
+	u32 image_height;
+	enum decon_out_type out_type;
+	struct decon_mode mode;
+};
+
 struct dpu_log {
-	ktime_t time;
+	u64 ts_nsec;
 	enum dpu_event_type type;
 
 	union {
@@ -403,6 +416,7 @@ struct dpu_log {
 		struct dpu_log_bts_event bts_event;
 		struct dpu_log_partial partial;
 		struct dpu_log_plane_info plane_info;
+		struct dpu_log_decon_cfg decon_cfg;
 		unsigned int value;
 	} data;
 };

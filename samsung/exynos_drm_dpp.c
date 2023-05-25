@@ -192,7 +192,8 @@ static inline const char *get_comp_type_str(enum dpp_comp_type type)
 void dpp_dump_buffer(struct drm_printer *p, struct dpp_device *dpp)
 {
 	const struct drm_plane_state *plane_state;
-	struct drm_framebuffer *fb;
+	struct exynos_drm_plane_state *exynos_plane_state;
+	struct drm_framebuffer *fb, *old_fb;
 	void *vaddr;
 
 	if (dpp->state != DPP_STATE_ON) {
@@ -222,16 +223,45 @@ void dpp_dump_buffer(struct drm_printer *p, struct dpp_device *dpp)
 	vaddr = exynos_drm_fb_to_vaddr(fb);
 	if (vaddr) {
 		dpp_drm_printf(p, dpp,
-				"=== buffer dump[%s:%s]: dpp%d dma addr 0x%llx, vaddr 0x%pK ===\n",
+				"=== buffer dump[%s:%s]: dpp%d dma addr 0x%pad, vaddr 0x%p ===\n",
 				get_comp_type_str(dpp->win_config.comp_type),
 				get_comp_src_name(dpp->comp_src),
-				dpp->id, dpp->win_config.addr[0], vaddr);
-		print_hex_dump(KERN_DEBUG, "", DUMP_PREFIX_ADDRESS, 32, 4, vaddr, 256, false);
+				dpp->id, &dpp->win_config.addr[0], vaddr);
+		dpu_print_hex_dump(p, NULL, vaddr, 256);
 	} else {
 		dpp_drm_printf(p, dpp, "unable to find vaddr\n");
 	}
 
 	drm_framebuffer_put(fb);
+
+	exynos_plane_state = to_exynos_plane_state(plane_state);
+	old_fb = exynos_plane_state->old_fb;
+	if (old_fb && old_fb != fb) {
+		drm_framebuffer_get(old_fb);
+		vaddr = exynos_drm_fb_to_vaddr(old_fb);
+		if (vaddr) {
+			dma_addr_t dma_addr = exynos_drm_fb_dma_addr(old_fb, 0);
+			u64 comp_src = old_fb->modifier & AFBC_FORMAT_MOD_SOURCE_MASK;
+			u64 comp_type;
+
+			if (has_all_bits(DRM_FORMAT_MOD_ARM_AFBC(0), fb->modifier))
+				comp_type = COMP_TYPE_AFBC;
+			else if (has_all_bits(DRM_FORMAT_MOD_SAMSUNG_SBWC(0), fb->modifier))
+				comp_type = COMP_TYPE_SBWC;
+			else
+				comp_type = COMP_TYPE_NONE;
+
+			dpp_drm_printf(p, dpp,
+				"=== old buffer dump[%s:%s]: dma addr 0x%pad, vaddr 0x%p ===\n",
+				get_comp_type_str(comp_type),
+				get_comp_src_name(comp_src),
+				&dma_addr, vaddr);
+			dpu_print_hex_dump(p, NULL, vaddr, 256);
+		} else {
+			dpp_drm_printf(p, dpp, "unable to find vaddr for old buffer\n");
+		}
+		drm_framebuffer_put(old_fb);
+	}
 }
 
 void dpp_dump(struct drm_printer *p, struct dpp_device *dpp)
@@ -241,7 +271,8 @@ void dpp_dump(struct drm_printer *p, struct dpp_device *dpp)
 		return;
 	}
 	__dpp_dump(p, dpp->id, dpp->regs.dpp_base_regs, dpp->regs.dma_base_regs,
-		   dpp->regs.sramc_base_regs, dpp->regs.hdr_comm_base_regs, dpp->attr);
+		   dpp->regs.sramc_base_regs, dpp->regs.hdr_comm_base_regs,
+		   dpp->regs.hdr_base_regs, dpp->attr);
 }
 
 void rcd_dump(struct drm_printer *p, struct dpp_device *dpp)
@@ -259,16 +290,57 @@ void cgc_dump(struct drm_printer *p, struct exynos_dma *dma)
 	__cgc_dump(p, dma->id, dma->regs);
 }
 
-bool dpp_need_enable_hdr(const struct dpp_device *dpp)
+static bool is_fmt_fp16(const struct dpu_fmt *fmt_info)
 {
-	if (unlikely(!dpp))
-		return false;
 
-	if (dpp->hdr.state.eotf_lut || dpp->hdr.state.oetf_lut ||
-				dpp->hdr.state.gm || dpp->hdr.state.tm)
+	if (fmt_info && (fmt_info->fmt == DRM_FORMAT_ARGB16161616F ||
+			fmt_info->fmt == DRM_FORMAT_ABGR16161616F))
 		return true;
 
 	return false;
+}
+
+bool dpp_need_enable_hdr(const struct dpp_device *dpp)
+{
+	bool hdr_en;
+
+	if (unlikely(!dpp))
+		return false;
+
+	hdr_en = (dpp->hdr.state.eotf_lut || dpp->hdr.state.oetf_lut ||
+			dpp->hdr.state.gm || dpp->hdr.state.tm);
+	if (hdr_en) {
+		/*
+		 * In ZUMA, when enabling HDR, need to enable EOTF or FP16/FP16_CVT. Otherwise HDR
+		 * engine canʼt work normally cause DPU stuck.
+		 */
+		const struct dpu_fmt *fmt_info = dpu_find_fmt_info(dpp->win_config.format);
+
+		if (!is_fmt_fp16(fmt_info) && !dpp->hdr.state.eotf_lut) {
+			printk_ratelimited(
+				"DPP%u: when enabling HDR, EOTF_EN need to be set(GM %s TM %s OETF %s)\n",
+				dpp->id,
+				dpp->hdr.state.gm ? "on" : "off",
+				dpp->hdr.state.tm ? "on" : "off",
+				dpp->hdr.state.oetf_lut ? "on" : "off");
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+			hdr_en = false;
+#endif
+		} else if (is_fmt_fp16(fmt_info) &&
+				!(dpp->hdr.fp16_en || dpp->hdr.fp16_cvt_en)) {
+			printk_ratelimited(
+				"DPP%u: when enabling HDR for FP16, FP16 or CVT need to be set(GM %s TM %s OETF %s)\n",
+				dpp->id,
+				dpp->hdr.state.gm ? "on" : "off",
+				dpp->hdr.state.tm ? "on" : "off",
+				dpp->hdr.state.oetf_lut ? "on" : "off");
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
+			hdr_en = false;
+#endif
+		}
+	}
+
+	return hdr_en;
 }
 
 static dma_addr_t dpp_alloc_map_buf_test(void)
@@ -631,6 +703,10 @@ static int set_protection(struct dpp_device *dpp, uint64_t modifier)
 	ret = exynos_smc(SMC_PROTECTION_SET, 0, protection_id,
 			(protection ? SMC_PROTECTION_ENABLE :
 			SMC_PROTECTION_DISABLE));
+	WARN(dma_reg_is_mst_security_enabled(dpp->id, &dpp->rdma_mst_security) != !protection,
+						"dpp[%u] mst_security: %#x\n",
+						dpp->id, dpp->rdma_mst_security);
+	DPU_EVENT_LOG(DPU_EVT_DPP_SET_PROTECTION, dpp->decon_id, dpp);
 	if (ret) {
 		dpp_err(dpp, "failed to %s protection(ch:%u, ret:%d)\n",
 				protection ? "enable" : "disable", dpp->id, ret);

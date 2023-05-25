@@ -59,6 +59,7 @@
 #define PANEL_REV_DVT1		BIT(9)
 #define PANEL_REV_DVT1_1	BIT(10)
 #define PANEL_REV_PVT		BIT(11)
+#define PANEL_REV_MP		BIT(12)
 #define PANEL_REV_LATEST	BIT(31)
 #define PANEL_REV_ALL		(~0)
 #define PANEL_REV_GE(rev)	(~((rev) - 1))
@@ -276,6 +277,15 @@ struct exynos_panel_funcs {
 	void (*set_local_hbm_mode_post)(struct exynos_panel *exynos_panel);
 
 	/**
+	 * @set_acl_mode:
+	 *
+	 * This callback is used to implement panel specific logic for acl mode
+	 * enablement. If this is not defined, it means that panel does not
+	 * support acl.
+	 */
+	void (*set_acl_mode)(struct exynos_panel *exynos_panel, bool on);
+
+	/**
 	 * @set_power:
 	 *
 	 * This callback is used to implement panel specific power on/off sequence.
@@ -468,6 +478,14 @@ struct exynos_panel_funcs {
 	 */
 	unsigned int (*get_te_usec)(struct exynos_panel *exynos_panel,
 				    const struct exynos_panel_mode *pmode);
+
+	/**
+	 * @run_normal_mode_work
+	 *
+	 * This callback is used to run the periodic work for each panel in
+	 * normal mode.
+	 */
+	void (*run_normal_mode_work)(struct exynos_panel *exynos_panel);
 };
 
 /**
@@ -584,6 +602,7 @@ struct exynos_panel_desc {
 	const struct panel_reg_ctrl reg_ctrl_post_enable[PANEL_REG_COUNT];
 	const struct panel_reg_ctrl reg_ctrl_pre_disable[PANEL_REG_COUNT];
 	const struct panel_reg_ctrl reg_ctrl_disable[PANEL_REG_COUNT];
+	const u32 normal_mode_work_delay_ms;
 };
 
 #define PANEL_ID_MAX		40
@@ -621,6 +640,9 @@ struct te2_data {
 struct exynos_panel {
 	struct device *dev;
 	struct drm_panel panel;
+	struct drm_crtc *crtc;
+	struct dentry *debugfs_entry;
+	struct dentry *debugfs_cmdset_entry;
 	struct gpio_desc *reset_gpio;
 	struct gpio_desc *enable_gpio;
 	struct regulator *vci;
@@ -684,6 +706,7 @@ struct exynos_panel {
 	enum exynos_cabc_mode cabc_mode;
 	struct backlight_device *bl;
 	struct mutex mode_lock;
+	struct mutex crtc_lock;
 	struct mutex bl_state_lock;
 	struct exynos_bl_notifier bl_notifier;
 
@@ -711,12 +734,17 @@ struct exynos_panel {
 	 * mean rr switch so it differs from last_mode_set_ts
 	 */
 	ktime_t last_rr_switch_ts;
+	/* Record the last come out lp mode timestamp */
+	ktime_t last_lp_exit_ts;
 	u32 last_rr;
 	/* TE low or high when last rr was sent */
 	int last_rr_te_gpio_value;
 	u64 last_rr_te_counter;
 	/* TE width before last rr command was sent */
 	u32 last_rr_te_usec;
+
+        /* Automatic Current Limiting(ACL) */
+	bool acl_mode;
 
 	struct {
 		struct local_hbm {
@@ -746,6 +774,9 @@ struct exynos_panel {
 
 	u32 error_count_te;
 	u32 error_count_unknown;
+
+	u32 normal_mode_work_delay_ms;
+	struct delayed_work normal_mode_work;
 };
 
 /**
@@ -916,47 +947,47 @@ static inline bool is_local_hbm_disabled(struct exynos_panel *ctx)
 		DUMP_PREFIX_NONE, 16, 1, cmd, len, false);	\
 } while (0)
 
-#define EXYNOS_DCS_WRITE_SEQ(ctx, seq...) do {				\
-	u8 d[] = { seq };						\
-	int ret;							\
-	ret = exynos_dcs_write(ctx, d, ARRAY_SIZE(d));			\
-	if (ret < 0)							\
-		EXYNOS_DCS_WRITE_PRINT_ERR(ctx, d, ARRAY_SIZE(d), ret);	\
-} while (0)
-
-#define EXYNOS_DCS_WRITE_SEQ_FLAGS(ctx, flags, seq...) do {				\
+#define EXYNOS_DCS_WRITE_SEQ_FLAGS(ctx, flags, seq...) do {		\
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);	\
 	u8 d[] = { seq };						\
 	int ret;							\
-	ret = exynos_dsi_dcs_write_buffer(dsi, d, ARRAY_SIZE(d), flags);		\
+	ret = exynos_dsi_dcs_write_buffer(dsi, d, ARRAY_SIZE(d), flags);\
 	if (ret < 0)							\
 		EXYNOS_DCS_WRITE_PRINT_ERR(ctx, d, ARRAY_SIZE(d), ret);	\
 } while (0)
 
 #define EXYNOS_DCS_WRITE_SEQ_DELAY(ctx, delay, seq...) do {		\
-	EXYNOS_DCS_WRITE_SEQ(ctx, seq);					\
-	usleep_range(delay * 1000, delay * 1000 + 10);			\
+	u8 d[] = { seq };						\
+	int ret;							\
+	ret = exynos_dcs_write_delay(ctx, d, ARRAY_SIZE(d), delay);	\
+	if (ret < 0)							\
+		EXYNOS_DCS_WRITE_PRINT_ERR(ctx, d, ARRAY_SIZE(d), ret);	\
+	else								\
+		usleep_range(delay * 1000, delay * 1000 + 10);		\
 } while (0)
 
-#define EXYNOS_DCS_WRITE_TABLE(ctx, table) do {					\
+#define EXYNOS_DCS_WRITE_SEQ(ctx, seq...) \
+	EXYNOS_DCS_WRITE_SEQ_DELAY(ctx, 0, seq)
+
+#define EXYNOS_DCS_WRITE_TABLE_FLAGS(ctx, table, flags) do {			\
+	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);		\
 	int ret;								\
-	ret = exynos_dcs_write(ctx, table, ARRAY_SIZE(table));			\
+	ret = exynos_dsi_dcs_write_buffer(dsi, table, ARRAY_SIZE(table), flags);\
 	if (ret < 0)								\
 		EXYNOS_DCS_WRITE_PRINT_ERR(ctx, table, ARRAY_SIZE(table), ret);	\
 } while (0)
 
-#define EXYNOS_DCS_WRITE_TABLE_FLAGS(ctx, table, flags) do {					\
-	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);	\
+#define EXYNOS_DCS_WRITE_TABLE_DELAY(ctx, delay, table) do {			\
 	int ret;								\
-	ret = exynos_dsi_dcs_write_buffer(dsi, table, ARRAY_SIZE(table), flags);		\
+	ret = exynos_dcs_write_delay(ctx, table, ARRAY_SIZE(table), delay);	\
 	if (ret < 0)								\
 		EXYNOS_DCS_WRITE_PRINT_ERR(ctx, table, ARRAY_SIZE(table), ret);	\
+	else									\
+		usleep_range(delay * 1000, delay * 1000 + 10);			\
 } while (0)
 
-#define EXYNOS_DCS_WRITE_TABLE_DELAY(ctx, delay, table) do {		\
-	EXYNOS_DCS_WRITE_TABLE(ctx, table);				\
-	usleep_range(delay * 1000, delay * 1000 + 10);			\
-} while (0)
+#define EXYNOS_DCS_WRITE_TABLE(ctx, table) \
+	EXYNOS_DCS_WRITE_TABLE_DELAY(ctx, 0, table)
 
 #define EXYNOS_DCS_BUF_ADD(ctx, seq...) \
 	EXYNOS_DCS_WRITE_SEQ_FLAGS(ctx, EXYNOS_DSI_MSG_QUEUE, seq)
@@ -999,6 +1030,10 @@ static inline bool is_local_hbm_disabled(struct exynos_panel *ctx)
 	i > 0;										\
 	i--, data++)									\
 
+#define EXYNOS_VREFRESH_TO_PERIOD_USEC(rate) DIV_ROUND_UP(USEC_PER_SEC, (rate) ? (rate) : 60)
+
+int exynos_panel_wait_for_vblank(struct exynos_panel *ctx);
+void exynos_panel_wait_for_vsync_done(struct exynos_panel *ctx, u32 te_us, u32 period_us);
 unsigned int panel_get_idle_time_delta(struct exynos_panel *ctx);
 int exynos_panel_configure_te2_edges(struct exynos_panel *ctx,
 				     u32 *timings, bool lp_mode);
@@ -1028,6 +1063,7 @@ void exynos_panel_debugfs_create_cmdset(struct exynos_panel *ctx,
 					const char *name);
 void exynos_panel_send_cmd_set_flags(struct exynos_panel *ctx, const struct exynos_dsi_cmd_set *cmd_set,
 			       u32 flags);
+inline void exynos_panel_msleep(u32 delay_ms);
 static inline void exynos_panel_send_cmd_set(struct exynos_panel *ctx,
 					     const struct exynos_dsi_cmd_set *cmd_set)
 {
@@ -1037,6 +1073,8 @@ void exynos_panel_set_lp_mode(struct exynos_panel *ctx, const struct exynos_pane
 void exynos_panel_set_binned_lp(struct exynos_panel *ctx, const u16 brightness);
 int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 				struct exynos_panel *ctx);
+int exynos_dcs_write_delay(struct exynos_panel *ctx, const void *data, size_t len,
+			   u32 delay_ms);
 ssize_t exynos_dsi_dcs_write_buffer(struct mipi_dsi_device *dsi,
 				const void *data, size_t len, u16 flags);
 ssize_t exynos_dsi_cmd_send_flags(struct mipi_dsi_device *dsi, u16 flags);

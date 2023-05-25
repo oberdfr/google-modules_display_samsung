@@ -263,6 +263,9 @@ static int decon_get_crtc_out_type(const struct drm_crtc_state *crtc_state)
 
 	drm_for_each_encoder_mask(encoder, dev, crtc_state->encoder_mask) {
 		switch (encoder->encoder_type) {
+		case DRM_MODE_ENCODER_LVDS:
+			out_type = DECON_OUT_DP0;
+			break;
 		case DRM_MODE_ENCODER_VIRTUAL:
 			/* if anything else is connected operate in cwb mode */
 			if (!out_type)
@@ -388,7 +391,10 @@ static void decon_update_config(struct decon_config *config,
 	config->mode.trig_mode = DECON_SW_TRIG;
 	config->te_from = MAX_DECON_TE_FROM_DDI;
 	config->dsc.enabled = false;
-	config->mode.op_mode = DECON_COMMAND_MODE;
+	if (config->out_type & DECON_OUT_DP)
+		config->mode.op_mode = DECON_VIDEO_MODE;
+	else
+		config->mode.op_mode = DECON_COMMAND_MODE;
 
 	if (!exynos_conn_state) {
 		pr_debug("%s: no private mode config\n", __func__);
@@ -1089,13 +1095,16 @@ void decon_mode_bts_pre_update(struct decon_device *decon,
 				const struct drm_atomic_state *old_state)
 {
 	const struct exynos_drm_crtc_state *exynos_crtc_state = to_exynos_crtc_state(crtc_state);
+	unsigned int vblank_usec = 0;
 
 	if (exynos_crtc_state->seamless_mode_changed) {
-		unsigned int vblank_usec = decon_get_vblank_usec(crtc_state, old_state);
+		if (decon->config.mode.op_mode == DECON_COMMAND_MODE)
+			vblank_usec = decon_get_vblank_usec(crtc_state, old_state);
 
 		decon_seamless_mode_bts_update(decon, &crtc_state->adjusted_mode, vblank_usec);
 	} else if (drm_atomic_crtc_needs_modeset(crtc_state)) {
-		unsigned int vblank_usec = decon_get_vblank_usec(crtc_state, old_state);
+		if (decon->config.mode.op_mode == DECON_COMMAND_MODE)
+			vblank_usec = decon_get_vblank_usec(crtc_state, old_state);
 
 		decon_mode_update_bts(decon, &crtc_state->adjusted_mode, vblank_usec);
 	} else if (!atomic_dec_if_positive(&decon->bts.delayed_update)) {
@@ -1262,7 +1271,8 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 	DPU_ATRACE_BEGIN(__func__);
 
 	if (decon->state == DECON_STATE_HIBERNATION) {
-		WARN_ON(!old_crtc_state->self_refresh_active);
+		WARN_ON(!old_crtc_state->self_refresh_active ||
+			crtc_state->mode_changed || crtc_state->connectors_changed);
 
 		if (old_exynos_crtc_state->bypass) {
 			spin_lock_irqsave(&decon->slock, flags);
@@ -1282,6 +1292,28 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 			crtc_get_exynos_connector_state(state, crtc_state);
 
 		decon_update_config(&decon->config, crtc_state, exynos_conn_state);
+		DPU_EVENT_LOG(DPU_EVT_DECON_UPDATE_CONFIG, decon->id, NULL);
+
+		/*
+		 * If CRTC(DECON) is connected with DP Connector, exynos_conn_state is NULL and
+		 * DECON's OUT_BPC is set by default 8. It needs to update here.
+		 */
+		if (decon->config.out_type & DECON_OUT_DP) {
+			const struct drm_connector_state *drm_conn_state =
+				crtc_get_drm_connector_state(state, crtc_state);
+
+			if (drm_conn_state) {
+				decon_info(decon, "drm_conn_state->max_bpc = %u\n",
+					   drm_conn_state->max_bpc);
+
+				/*
+				 * For now, force DP decon out_bpc = 8.
+				 * TODO: Revisit this later for DP HDR support.
+				 */
+				decon->config.out_bpc = 8;
+				decon_info(decon, "out_bpc = %u\n", decon->config.out_bpc);
+			}
+		}
 
 		if (decon_is_te_enabled(decon))
 			decon_request_te_irq(exynos_crtc, exynos_conn_state);
@@ -1535,7 +1567,7 @@ static int dpu_sysmmu_fault_handler(struct iommu_fault *fault, void *data)
 {
 	struct decon_device *decon = data;
 
-	if (!decon)
+	if (!decon || !decon_is_effectively_active(decon))
 		return 0;
 
 	DPU_EVENT_LOG(DPU_EVT_SYSMMU_FAULT, decon->id, NULL);
@@ -1685,6 +1717,7 @@ static irqreturn_t decon_irq_handler(int irq, void *dev_data)
 			__func__, irq_sts_reg, ext_irq);
 
 	if (irq_sts_reg & DPU_FRAME_DONE_INT_PEND) {
+		DPU_ATRACE_INT_PID("frame_transfer", 0, decon->thread->pid);
 		DPU_EVENT_LOG(DPU_EVT_DECON_FRAMEDONE, decon->id, decon);
 		exynos_dqe_save_lpd_data(decon->dqe);
 		if (decon->dqe)
@@ -1736,6 +1769,7 @@ static bool decon_check_fs_pending_locked(struct decon_device *decon)
 	pending_irq = decon_reg_get_fs_interrupt_and_clear(decon->id);
 
 	if (pending_irq & DPU_FRAME_START_INT_PEND) {
+		DPU_ATRACE_INT_PID("frame_transfer", 1, decon->thread->pid);
 		DPU_EVENT_LOG(DPU_EVT_DECON_FRAMESTART, decon->id, decon);
 		decon_send_vblank_event_locked(decon);
 		if (decon->config.mode.op_mode == DECON_VIDEO_MODE)
@@ -1841,35 +1875,35 @@ static int decon_parse_dt(struct decon_device *decon, struct device_node *np)
 
 	if (of_property_read_u32(np, "ppc", (u32 *)&decon->bts.ppc))
 		decon->bts.ppc = 2U;
-	decon_info(decon, "PPC(%u)\n", decon->bts.ppc);
+	decon_debug(decon, "PPC(%u)\n", decon->bts.ppc);
 
 	if (of_property_read_u32(np, "ppc_rotator",
 					(u32 *)&decon->bts.ppc_rotator)) {
 		decon->bts.ppc_rotator = 4U;
 		decon_warn(decon, "WARN: rotator ppc is not defined in DT.\n");
 	}
-	decon_info(decon, "rotator ppc(%d)\n", decon->bts.ppc_rotator);
+	decon_debug(decon, "rotator ppc(%d)\n", decon->bts.ppc_rotator);
 
 	if (of_property_read_u32(np, "ppc_scaler",
 					(u32 *)&decon->bts.ppc_scaler)) {
 		decon->bts.ppc_scaler = 2U;
 		decon_warn(decon, "WARN: scaler ppc is not defined in DT.\n");
 	}
-	decon_info(decon, "scaler ppc(%d)\n", decon->bts.ppc_scaler);
+	decon_debug(decon, "scaler ppc(%d)\n", decon->bts.ppc_scaler);
 
 	if (of_property_read_u32(np, "delay_comp",
 				(u32 *)&decon->bts.delay_comp)) {
 		decon->bts.delay_comp = 4UL;
 		decon_warn(decon, "WARN: comp line delay is not defined in DT.\n");
 	}
-	decon_info(decon, "line delay comp(%d)\n", decon->bts.delay_comp);
+	decon_debug(decon, "line delay comp(%d)\n", decon->bts.delay_comp);
 
 	if (of_property_read_u32(np, "delay_scaler",
 				(u32 *)&decon->bts.delay_scaler)) {
 		decon->bts.delay_scaler = 2UL;
 		decon_warn(decon, "WARN: scaler line delay is not defined in DT.\n");
 	}
-	decon_info(decon, "line delay scaler(%d)\n", decon->bts.delay_scaler);
+	decon_debug(decon, "line delay scaler(%d)\n", decon->bts.delay_scaler);
 
 	if (of_property_read_u32(np, "bus_width", &decon->bts.bus_width)) {
 		decon->bts.bus_width = 16;
@@ -1923,12 +1957,12 @@ static int decon_parse_dt(struct decon_device *decon, struct device_node *np)
 
 	if (!err_flag) {
 		of_property_read_u32_array(np, "dfs_lv", dfs_lv_khz, dfs_lv_cnt);
-		decon_info(decon, "DPU DFS Level : ");
+		decon_debug(decon, "DPU DFS Level : ");
 		for (i = 0; i < dfs_lv_cnt; i++) {
 			decon->bts.dfs_lv_khz[i] = dfs_lv_khz[i];
-			decon_info(decon, "%6d ", dfs_lv_khz[i]);
+			decon_debug(decon, "%6d ", dfs_lv_khz[i]);
 		}
-		decon_info(decon, "\n");
+		decon_debug(decon, "\n");
 	}
 
 	decon->dpp_cnt = of_count_phandle_with_args(np, "dpps", NULL);
@@ -1946,7 +1980,7 @@ static int decon_parse_dt(struct decon_device *decon, struct device_node *np)
 		}
 
 		dpp_id = decon->dpp[i]->id;
-		decon_info(decon, "found dpp%d\n", dpp_id);
+		decon_debug(decon, "found dpp%d\n", dpp_id);
 
 		if (dpp_np)
 			of_node_put(dpp_np);
@@ -2155,13 +2189,13 @@ static int decon_get_clock(struct decon_device *decon)
 {
 	decon->res.aclk = devm_clk_get(decon->dev, "aclk");
 	if (IS_ERR_OR_NULL(decon->res.aclk)) {
-		decon_info(decon, "failed to get aclk(optional)\n");
+		decon_debug(decon, "failed to get aclk(optional)\n");
 		decon->res.aclk = NULL;
 	}
 
 	decon->res.aclk_disp = devm_clk_get(decon->dev, "aclk-disp");
 	if (IS_ERR_OR_NULL(decon->res.aclk_disp)) {
-		decon_info(decon, "failed to get aclk_disp(optional)\n");
+		decon_debug(decon, "failed to get aclk_disp(optional)\n");
 		decon->res.aclk_disp = NULL;
 	}
 
@@ -2207,6 +2241,8 @@ static int decon_probe(struct platform_device *pdev)
 	decon = devm_kzalloc(dev, sizeof(struct decon_device), GFP_KERNEL);
 	if (!decon)
 		return -ENOMEM;
+
+	dma_set_mask(&pdev->dev, DMA_BIT_MASK(32));
 
 	decon->dev = dev;
 
