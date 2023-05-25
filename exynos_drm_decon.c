@@ -51,6 +51,10 @@
 #include "exynos_drm_fb.h"
 #include "exynos_drm_plane.h"
 
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+#include "gs_drm/gs_drm_connector.h"
+#endif
+
 struct decon_device *decon_drvdata[MAX_DECON_CNT];
 
 #define decon_info(decon, fmt, ...)	\
@@ -76,7 +80,7 @@ MODULE_DEVICE_TABLE(of, decon_driver_dt_match);
 static void decon_seamless_mode_set(struct exynos_drm_crtc *exynos_crtc,
 				    struct drm_crtc_state *old_crtc_state);
 static int decon_request_te_irq(struct exynos_drm_crtc *exynos_crtc,
-				const struct exynos_drm_connector_state *exynos_conn_state);
+				const struct drm_connector_state *conn_state);
 static bool decon_check_fs_pending_locked(struct decon_device *decon);
 
 #ifdef CONFIG_BOARD_EMULATOR
@@ -325,36 +329,72 @@ static bool has_writeback_job(struct drm_crtc_state *new_crtc_state)
 	return false;
 }
 
-static void decon_update_dsi_config(struct decon_config *config,
-				    const struct drm_crtc_state *crtc_state,
-				    const struct exynos_drm_connector_state *exynos_conn_state)
+static void update_dsi_config_params(struct decon_config *config,
+				     const struct drm_crtc_state *crtc_state, bool dsc_enabled,
+				     unsigned int dsc_count, const struct drm_dsc_config *cfg,
+				     unsigned int delay_reg_init_us, unsigned int mode_flags,
+				     bool sw_trigger, int te_from)
+
 {
-	const struct exynos_display_mode *exynos_mode = &exynos_conn_state->exynos_mode;
 	bool is_vid_mode;
 
-	config->dsc.enabled = exynos_mode->dsc.enabled;
-	if (exynos_mode->dsc.enabled) {
-		config->dsc.dsc_count = exynos_mode->dsc.dsc_count;
-		config->dsc.slice_count = exynos_mode->dsc.slice_count;
-		config->dsc.slice_height = exynos_mode->dsc.slice_height;
+	config->dsc.enabled = dsc_enabled;
+	if (dsc_enabled) {
+		config->dsc.dsc_count = dsc_count;
+		config->dsc.slice_count = cfg->slice_count;
+		config->dsc.slice_height = cfg->slice_height;
 		config->dsc.slice_width = DIV_ROUND_UP(config->image_width,
 						       config->dsc.slice_count);
-		config->dsc.cfg = exynos_mode->dsc.cfg;
-		config->dsc.delay_reg_init_us = exynos_mode->dsc.delay_reg_init_us;
+		config->dsc.cfg = cfg;
+		config->dsc.delay_reg_init_us = delay_reg_init_us;
 	}
 
-	is_vid_mode = (exynos_mode->mode_flags & MIPI_DSI_MODE_VIDEO) != 0;
+	is_vid_mode = (mode_flags & MIPI_DSI_MODE_VIDEO) != 0;
 
 	config->mode.op_mode = is_vid_mode ? DECON_VIDEO_MODE : DECON_COMMAND_MODE;
 
-	if (!is_vid_mode && !exynos_mode->sw_trigger) {
-		if (exynos_conn_state->te_from >= MAX_DECON_TE_FROM_DDI) {
-			pr_warn("TE from DDI is not valid (%d)\n", exynos_conn_state->te_from);
+	if (!is_vid_mode && !sw_trigger) {
+		if (te_from >= MAX_DECON_TE_FROM_DDI) {
+			pr_warn("TE from DDI is not valid (%d)\n", te_from);
 		} else {
 			config->mode.trig_mode = DECON_HW_TRIG;
-			config->te_from = exynos_conn_state->te_from;
+			config->te_from = te_from;
 			pr_debug("TE from DDI%d\n", config->te_from);
 		}
+	}
+}
+
+static void decon_update_dsi_config(struct decon_config *config,
+				    const struct drm_crtc_state *crtc_state,
+				    const struct drm_connector_state *conn_state)
+{
+	if (is_exynos_drm_connector(conn_state->connector)) {
+		const struct exynos_drm_connector_state *exynos_conn_state;
+		const struct exynos_display_mode *exynos_mode;
+
+		exynos_conn_state = to_exynos_connector_state(conn_state);
+		exynos_mode = &exynos_conn_state->exynos_mode;
+		update_dsi_config_params(config, crtc_state, exynos_mode->dsc.enabled,
+					 exynos_mode->dsc.dsc_count, exynos_mode->dsc.cfg,
+					 exynos_mode->dsc.delay_reg_init_us,
+					 exynos_mode->mode_flags, exynos_mode->sw_trigger,
+					 exynos_conn_state->te_from);
+	}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	else if (is_gs_drm_connector(conn_state->connector)) {
+		const struct gs_drm_connector_state *gs_conn_state;
+		const struct gs_display_mode *gs_mode;
+
+		gs_conn_state = to_gs_connector_state(conn_state);
+		gs_mode = &gs_conn_state->gs_mode;
+		update_dsi_config_params(config, crtc_state, gs_mode->dsc.enabled,
+					 gs_mode->dsc.dsc_count, gs_mode->dsc.cfg,
+					 gs_mode->dsc.delay_reg_init_us, gs_mode->mode_flags,
+					 gs_mode->sw_trigger, gs_conn_state->te_from);
+	}
+#endif
+	else {
+		pr_warn("%s Unsupported connector type\n", __func__);
 	}
 }
 
@@ -372,7 +412,7 @@ static int decon_get_main_dsim_id(void)
 
 static void decon_update_config(struct decon_config *config,
 				const struct drm_crtc_state *crtc_state,
-				const struct exynos_drm_connector_state *exynos_conn_state)
+				const struct drm_connector_state *conn_state)
 {
 	const struct drm_display_mode *mode = &crtc_state->adjusted_mode;
 
@@ -398,7 +438,7 @@ static void decon_update_config(struct decon_config *config,
 	else
 		config->mode.op_mode = DECON_COMMAND_MODE;
 
-	if (!exynos_conn_state) {
+	if (!conn_state) {
 		pr_debug("%s: no private mode config\n", __func__);
 
 		/* default bpc */
@@ -407,18 +447,29 @@ static void decon_update_config(struct decon_config *config,
 	}
 
 	if (config->mode.dsi_mode != DSI_MODE_NONE)
-		decon_update_dsi_config(config, crtc_state, exynos_conn_state);
+		decon_update_dsi_config(config, crtc_state, conn_state);
 
-	config->out_bpc = exynos_conn_state->exynos_mode.bpc;
+	if (is_exynos_drm_connector(conn_state->connector))
+		config->out_bpc = to_exynos_connector_state(conn_state)->exynos_mode.bpc;
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	else if (is_gs_drm_connector(conn_state->connector))
+		config->out_bpc = to_gs_connector_state(conn_state)->gs_mode.bpc;
+#endif
+	else {
+		pr_debug("%s: unsupported connector type\n", __func__);
+		/* default bpc */
+		config->out_bpc = 8;
+		return;
+	}
 }
 
 static bool decon_is_seamless_possible(const struct decon_device *decon,
 				       const struct drm_crtc_state *crtc_state,
-				       const struct exynos_drm_connector_state *exynos_conn_state)
+				       const struct drm_connector_state *conn_state)
 {
 	struct decon_config new_config = decon->config;
 
-	decon_update_config(&new_config, crtc_state, exynos_conn_state);
+	decon_update_config(&new_config, crtc_state, conn_state);
 
 	/* don't allow any changes in decon config */
 	return !memcmp(&new_config, &decon->config, sizeof(new_config));
@@ -430,27 +481,50 @@ static int decon_check_modeset(struct exynos_drm_crtc *exynos_crtc,
 	struct drm_atomic_state *state = crtc_state->state;
 	const struct decon_device *decon = exynos_crtc->ctx;
 	struct exynos_drm_crtc_state *exynos_crtc_state;
-	const struct exynos_drm_connector_state *exynos_conn_state;
 	struct drm_crtc *crtc = &exynos_crtc->base;
 	const struct drm_crtc_state *old_crtc_state = drm_atomic_get_old_crtc_state(state, crtc);
+	const struct drm_connector_state *conn_state;
+	bool conn_state_seamless_possible, dsc_enabled;
+	unsigned int dsc_count;
 
-	exynos_conn_state = crtc_get_exynos_connector_state(state, crtc_state);
-	if (!exynos_conn_state)
+	conn_state = crtc_get_connector_state(state, crtc_state);
+	if (!conn_state)
 		return 0;
+
+	if (is_exynos_drm_connector(conn_state->connector)) {
+		const struct exynos_drm_connector_state *exynos_conn_state;
+
+		exynos_conn_state = to_exynos_connector_state(conn_state);
+		conn_state_seamless_possible = exynos_conn_state->seamless_possible;
+		dsc_enabled = exynos_conn_state->exynos_mode.dsc.enabled;
+		dsc_count = exynos_conn_state->exynos_mode.dsc.dsc_count;
+	}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	else if (is_gs_drm_connector(conn_state->connector)) {
+		const struct gs_drm_connector_state *gs_conn_state;
+
+		gs_conn_state = to_gs_connector_state(conn_state);
+		conn_state_seamless_possible = gs_conn_state->seamless_possible;
+		dsc_enabled = gs_conn_state->gs_mode.dsc.enabled;
+		dsc_count = gs_conn_state->gs_mode.dsc.dsc_count;
+	}
+#endif
+	else {
+		pr_warn("%s Unsupported connector type\n", __func__);
+		return 0;
+	}
 
 	/* only decon0 supports more than 1 dsc */
 	if (decon->id != 0) {
-		const struct exynos_display_mode *mode_priv = &exynos_conn_state->exynos_mode;
-
-		if (mode_priv->dsc.enabled && (mode_priv->dsc.dsc_count > 1)) {
-			decon_err(decon, "cannot support %d dsc\n", mode_priv->dsc.dsc_count);
+		if (dsc_enabled && (dsc_count > 1)) {
+			decon_err(decon, "cannot support %d dsc\n", dsc_count);
 			return -EINVAL;
 		}
 	}
 
-	if (exynos_conn_state->seamless_possible && !crtc_state->connectors_changed &&
+	if (conn_state_seamless_possible && !crtc_state->connectors_changed &&
 	    drm_atomic_crtc_effectively_active(old_crtc_state) && crtc_state->active) {
-		if (!decon_is_seamless_possible(decon, crtc_state, exynos_conn_state)) {
+		if (!decon_is_seamless_possible(decon, crtc_state, conn_state)) {
 			decon_warn(decon, "seamless not possible for mode %s\n",
 				   crtc_state->adjusted_mode.name);
 		} else {
@@ -1083,13 +1157,26 @@ static void decon_seamless_mode_bts_update(struct decon_device *decon,
 static unsigned int decon_get_vblank_usec(const struct drm_crtc_state *crtc_state,
 					const struct drm_atomic_state *old_state)
 {
-	const struct exynos_drm_connector_state *exynos_conn_state =
-			crtc_get_exynos_connector_state(old_state, crtc_state);
-
-	if (WARN_ON(!exynos_conn_state))
+	const struct drm_connector_state *conn_state =
+		crtc_get_connector_state(old_state, crtc_state);
+	if (WARN_ON(!conn_state))
 		return DEFAULT_VBLANK_USEC;
+	if (is_exynos_drm_connector(conn_state->connector)) {
+		const struct exynos_drm_connector_state *exynos_conn_state =
+			to_exynos_connector_state(conn_state);
 
-	return exynos_conn_state->exynos_mode.vblank_usec;
+		return exynos_conn_state->exynos_mode.vblank_usec;
+	}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	else if (is_gs_drm_connector(conn_state->connector)) {
+		const struct gs_drm_connector_state *gs_conn_state =
+			to_gs_connector_state(conn_state);
+
+		return gs_conn_state->gs_mode.vblank_usec;
+	}
+#endif
+	else
+		return DEFAULT_VBLANK_USEC;
 }
 
 void decon_mode_bts_pre_update(struct decon_device *decon,
@@ -1298,10 +1385,10 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 
 	if (crtc_state->mode_changed || crtc_state->connectors_changed) {
 		const struct drm_atomic_state *state = old_crtc_state->state;
-		const struct exynos_drm_connector_state *exynos_conn_state =
-			crtc_get_exynos_connector_state(state, crtc_state);
+		const struct drm_connector_state *conn_state =
+			crtc_get_connector_state(state, crtc_state);
 
-		decon_update_config(&decon->config, crtc_state, exynos_conn_state);
+		decon_update_config(&decon->config, crtc_state, conn_state);
 		DPU_EVENT_LOG(DPU_EVT_DECON_UPDATE_CONFIG, decon->id, NULL);
 
 		/*
@@ -1326,7 +1413,7 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 		}
 
 		if (decon_is_te_enabled(decon)) {
-			decon_request_te_irq(exynos_crtc, exynos_conn_state);
+			decon_request_te_irq(exynos_crtc, conn_state);
 
 			if (decon_init)
 				decon->is_first_te_triggered = false;
@@ -1368,17 +1455,28 @@ ret:
 				     BOOT_DSC_REG_INIT_DELAY_US + 100);
 		} else if (decon->config.dsc.delay_reg_init_us) {
 			struct drm_atomic_state *state = old_crtc_state->state;
-			struct exynos_drm_connector_state *exynos_conn_state =
-					crtc_get_exynos_connector_state(state, crtc_state);
-			struct exynos_display_mode *exynos_mode =
-					&exynos_conn_state->exynos_mode;
 			unsigned int delay_us = decon->config.dsc.delay_reg_init_us;
+			struct drm_connector_state *conn_state =
+				crtc_get_connector_state(state, crtc_state);
 
 			decon_wait_for_te(decon, vrefresh);
 			usleep_range(delay_us, delay_us + 100);
 
 			/* remove the delay */
-			exynos_mode->dsc.delay_reg_init_us = 0;
+			if (is_exynos_drm_connector(conn_state->connector)) {
+				struct exynos_display_mode *exynos_mode =
+					&to_exynos_connector_state(conn_state)->exynos_mode;
+
+				exynos_mode->dsc.delay_reg_init_us = 0;
+			}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+			else if (is_gs_drm_connector(conn_state->connector)) {
+				struct gs_display_mode *gs_mode =
+					&to_gs_connector_state(conn_state)->gs_mode;
+
+				gs_mode->dsc.delay_reg_init_us = 0;
+			}
+#endif
 			decon->config.dsc.delay_reg_init_us = 0;
 		}
 
@@ -2117,22 +2215,36 @@ end:
 }
 
 static int decon_request_te_irq(struct exynos_drm_crtc *exynos_crtc,
-				const struct exynos_drm_connector_state *exynos_conn_state)
+				const struct drm_connector_state *conn_state)
 {
 	struct decon_device *decon = exynos_crtc->ctx;
-	int ret, irq;
+	int ret, irq, te_gpio;
 	unsigned long flags = IRQF_TRIGGER_RISING;
 
-	if (WARN_ON(!exynos_conn_state))
+	if (WARN_ON(!conn_state))
 		return -EINVAL;
 
 	WARN(decon->irq_te >= 0, "unbalanced te irq\n");
 
-	irq = gpio_to_irq(exynos_conn_state->te_gpio);
-	if (decon->d.force_te_on && exynos_conn_state->te_gpio > 0) {
-		flags |= IRQF_TRIGGER_FALLING;
-		decon->te_gpio = exynos_conn_state->te_gpio;
+	if (is_exynos_drm_connector(conn_state->connector)) {
+		te_gpio = to_exynos_connector_state(conn_state)->te_gpio;
+		if (decon->d.force_te_on && te_gpio > 0) {
+			flags |= IRQF_TRIGGER_FALLING;
+			decon->te_gpio = te_gpio;
+		}
 	}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	else if (is_gs_drm_connector(conn_state->connector)) {
+		te_gpio = to_gs_connector_state(conn_state)->te_gpio;
+		if (decon->d.force_te_on && te_gpio > 0) {
+			flags |= IRQF_TRIGGER_FALLING;
+			decon->te_gpio = te_gpio;
+		}
+	}
+#endif
+	else
+		return -EINVAL;
+	irq = gpio_to_irq(te_gpio);
 
 	decon_debug(decon, "TE irq number(%d)\n", irq);
 	irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY);

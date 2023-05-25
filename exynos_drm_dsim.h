@@ -125,6 +125,25 @@ struct dsim_device {
 
 extern struct dsim_device *dsim_drvdata[MAX_DSI_CNT];
 
+/**
+ * struct dsim_connector_funcs - Abstraction of connector-aware funcs
+ * @atomic_check: Checking validity of mode change
+ * @atomic_mode_set: Sets mode
+ * @set_state_recovering: Sets connector state to reflect recovery
+ * @update_config_for_mode: Updates dsim_reg to match mode
+ */
+struct dsim_connector_funcs {
+	int (*atomic_check)(const struct dsim_device *dsim, struct drm_crtc_state *crtc_state,
+			    struct drm_connector_state *conn_state);
+	void (*atomic_mode_set)(struct dsim_device *dsim, struct drm_crtc_state *crtc_state,
+				struct drm_connector_state *conn_state);
+	void (*set_state_recovering)(struct drm_connector_state *conn_state);
+	void (*update_config_for_mode)(struct dsim_reg_config *config,
+				       const struct drm_display_mode *mode,
+				       const struct drm_connector_state *conn_state);
+};
+struct dsim_connector_funcs *get_connector_funcs(const struct drm_connector_state *conn_state);
+
 #define encoder_to_dsim(e) container_of(e, struct dsim_device, encoder)
 #define host_to_dsi(host) container_of(host, struct dsim_device, dsi_host)
 

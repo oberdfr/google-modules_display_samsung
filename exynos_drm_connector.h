@@ -254,9 +254,9 @@ int exynos_drm_connector_create_properties(struct drm_device *dev);
 struct exynos_drm_connector_properties *
 exynos_drm_connector_get_properties(struct exynos_drm_connector *exynos_conector);
 
-static inline struct exynos_drm_connector_state *
-crtc_get_exynos_connector_state(const struct drm_atomic_state *state,
-				const struct drm_crtc_state *crtc_state)
+static inline struct drm_connector_state *
+crtc_get_connector_state(const struct drm_atomic_state *state,
+			 const struct drm_crtc_state *crtc_state)
 {
 	const struct drm_connector *conn;
 	struct drm_connector_state *conn_state;
@@ -266,10 +266,8 @@ crtc_get_exynos_connector_state(const struct drm_atomic_state *state,
 		if (!(crtc_state->connector_mask & drm_connector_mask(conn)))
 			continue;
 
-		if (is_exynos_drm_connector(conn))
-			return to_exynos_connector_state(conn_state);
+		return conn_state;
 	}
-
 	return NULL;
 }
 
