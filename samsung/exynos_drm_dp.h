@@ -15,7 +15,7 @@
 
 #include <drm/drm_encoder.h>
 #include <drm/drm_connector.h>
-#include <drm/drm_dp_helper.h>
+#include <drm/display/drm_dp_helper.h>
 #include <linux/extcon.h>
 
 #include "exynos_drm_drv.h"
