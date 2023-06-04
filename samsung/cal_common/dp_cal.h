@@ -14,6 +14,7 @@
 #define __SAMSUNG_DP_CAL_H__
 
 #include <linux/usb/typec_dp.h>
+#include <linux/usb/dwc3-exynos.h>
 
 /* Register definition */
 enum sst_id {
@@ -97,6 +98,21 @@ typedef enum {
 	TRAINING_PATTERN_3 = 3,
 	TRAINING_PATTERN_4 = 5,
 } dp_training_pattern;
+
+typedef enum {
+	DISABLE_PATTERN	= 0,
+	D10_2_PATTERN	= 1,	// D10.2 Test Pattern
+	SERP_PATTERN	= 2,	// Symbol Error Rate measurement Pattern
+	PRBS7		= 3,	// PRBS 7bit Pattern
+	CUSTOM_80BIT	= 4,	// Custom 80bit (PLT) Test Pattern
+	HBR2_COMPLIANCE	= 5,	// HBR2 Compliance Test Pattern CP2520
+} dp_qual_pattern;
+
+typedef enum {
+	ENABLE_SCRAM	= 0,
+	DISABLE_SCRAM	= 1,
+} dp_scrambling;
+
 
 // Interrupts
 enum dp_interrupt_mask {
@@ -313,6 +329,7 @@ void dp_hw_send_avi_infoframe(struct infoframe avi_infoframe);
 void dp_hw_send_spd_infoframe(struct infoframe spd_infoframe);
 
 void dp_hw_set_training_pattern(dp_training_pattern pattern);
+void dp_hw_set_quality_pattern(dp_qual_pattern pattern, dp_scrambling scramble);
 void dp_hw_set_voltage_and_pre_emphasis(struct dp_hw_config *hw_config, u8 *voltage, u8 *pre_emphasis);
 
 void dp_hw_init_audio(void);
@@ -334,8 +351,5 @@ void dp_hw_set_hdcp13_function(u32 en);
 void dp_hw_set_hdcp13_encryption(u32 en);
 void dp_hw_set_hdcp22_function(u32 en);
 void dp_hw_set_hdcp22_encryption(u32 en);
-
-/* USB Interface Prototypes for Combo-PHY Handshaking */
-extern int dwc3_exynos_phy_enable(int owner, bool on);
 
 #endif /* __SAMSUNG_DP_CAL_H__ */

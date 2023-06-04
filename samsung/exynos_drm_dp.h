@@ -147,9 +147,8 @@ struct dp_device {
 	struct dp_resources res;
 
 	struct workqueue_struct *dp_wq;
-	struct delayed_work hpd_plug_work;
-	struct delayed_work hpd_unplug_work;
-	struct delayed_work hpd_irq_work;
+	struct work_struct hpd_work;
+	struct work_struct hpd_irq_work;
 
 	struct mutex cmd_lock;
 	struct mutex hpd_lock;
@@ -216,5 +215,6 @@ extern void dp_register_func_for_hdcp22(void (*func0)(u32 en),
 void dp_enable_dposc(struct dp_device *dp);
 void dp_disable_dposc(struct dp_device *dp);
 int dp_get_clock(struct dp_device *dp);
+int dp_remap_regs_other(struct dp_device *dp);
 
 #endif // __EXYNOS_DRM_DP_H__
