@@ -1869,17 +1869,17 @@ err:
 
 static int dp_register_irq(struct dp_device *dp, struct platform_device *pdev)
 {
-	struct resource *res;
+	int irq;
 	int ret = 0;
 
-	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
-	if (!res) {
-		dp_err(dp, "failed to get irq resource\n");
+	irq = platform_get_irq_byname(pdev, "dp_link");
+	if (irq <= 0) {
+		dp_err(dp, "failed to get irq resource (%d)\n", irq);
 		return -ENOENT;
 	}
 
-	dp->res.irq = res->start;
-	ret = devm_request_irq(dp->dev, res->start, dp_irq_handler, 0,
+	dp->res.irq = irq;
+	ret = devm_request_irq(dp->dev, irq, dp_irq_handler, 0,
 			       pdev->name, dp);
 	if (ret) {
 		dp_err(dp, "failed to install DP irq\n");
