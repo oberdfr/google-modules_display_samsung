@@ -70,6 +70,7 @@ kernel_module(
     ],
     deps = [
         "//private/google-modules/bms/misc:bms-misc",
+        "//private/google-modules/display/common/gs_drm",
         "//private/google-modules/hdcp/samsung:hdcp.samsung",
         "//private/google-modules/soc/gs:gs_soc_module",
     ],
