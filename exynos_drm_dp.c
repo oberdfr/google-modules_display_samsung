@@ -15,6 +15,7 @@
 #include <linux/component.h>
 #include <linux/dma-mapping.h>
 #include <linux/pm_runtime.h>
+#include <linux/of_address.h>
 #include <linux/irq.h>
 #include <linux/hdmi.h>
 #include <video/videomode.h>
@@ -83,6 +84,7 @@ static void dp_set_hpd_state(struct dp_device *dp,
 			     enum hotplug_state hpd_current_state)
 {
 	mutex_lock(&dp->hpd_state_lock);
+	dp_info(dp, "DP HPD changed to %d\n", hpd_current_state);
 	dp->hpd_current_state = hpd_current_state;
 	mutex_unlock(&dp->hpd_state_lock);
 }
@@ -129,7 +131,12 @@ static bool dp_get_fast_training(struct dp_device *dp)
 #define MAX_VOLTAGE_LEVEL 3
 #define MAX_PREEMPH_LEVEL 3
 
-static unsigned long dp_rate = 2;    /* HBR2 is the default */
+#define DP_LINK_RATE_RBR  0
+#define DP_LINK_RATE_HBR  1
+#define DP_LINK_RATE_HBR2 2
+#define DP_LINK_RATE_HBR3 3
+
+static unsigned long dp_rate = DP_LINK_RATE_HBR2;    /* HBR2 is the default */
 module_param(dp_rate, ulong, 0664);
 MODULE_PARM_DESC(dp_rate, "use specific DP link rate by setting dp_rate=x");
 
@@ -140,16 +147,16 @@ MODULE_PARM_DESC(dp_lanes, "use specific number of DP lanes by setting dp_lanes=
 static void dp_fill_host_caps(struct dp_device *dp)
 {
 	switch (dp_rate) {
-	case 0:
+	case DP_LINK_RATE_RBR:
 		dp->host.link_rate = drm_dp_bw_code_to_link_rate(DP_LINK_BW_1_62);
 		break;
-	case 1:
+	case DP_LINK_RATE_HBR:
 		dp->host.link_rate = drm_dp_bw_code_to_link_rate(DP_LINK_BW_2_7);
 		break;
-	case 3:
+	case DP_LINK_RATE_HBR3:
 		dp->host.link_rate = drm_dp_bw_code_to_link_rate(DP_LINK_BW_8_1);
 		break;
-	case 2:
+	case DP_LINK_RATE_HBR2:
 	default:
 		dp->host.link_rate = drm_dp_bw_code_to_link_rate(DP_LINK_BW_5_4);
 		break;
@@ -480,8 +487,8 @@ static bool dp_do_link_training_cr(struct dp_device *dp, u32 interval_us)
 		// Set Voltage
 		dp_print_swing_level(dp);
 		dp_hw_set_voltage_and_pre_emphasis(&dp->hw_config,
-						   (u8 *)vol_swing_level,
-						   (u8 *)pre_empha_level);
+						   vol_swing_level,
+						   pre_empha_level);
 
 		// Write Link Training
 		for (i = 0; i < dp->link.num_lanes; i++)
@@ -581,8 +588,8 @@ static bool dp_do_link_training_eq(struct dp_device *dp, u32 interval_us,
 		// Set Voltage
 		dp_print_swing_level(dp);
 		dp_hw_set_voltage_and_pre_emphasis(&dp->hw_config,
-						   (u8 *)vol_swing_level,
-						   (u8 *)pre_empha_level);
+						   vol_swing_level,
+						   pre_empha_level);
 
 		// Write Link Training
 		for (i = 0; i < dp->link.num_lanes; i++)
@@ -1118,6 +1125,8 @@ static void dp_on_by_hpd_plug(struct dp_device *dp)
 		dp->state = DP_STATE_ON;
 		dp_info(dp, "%s: DP State changed to ON\n", __func__);
 
+		hdcp_dplink_connect_state(DP_CONNECT);
+
 		if (dev) {
 			connector->status = connector_status_connected;
 			dp_info(dp,
@@ -1185,6 +1194,8 @@ static void dp_off_by_hpd_plug(struct dp_device *dp)
 
 	if (dp->state >= DP_STATE_ON) {
 		if (!dp->bist_used) {
+			hdcp_dplink_connect_state(DP_DISCONNECT);
+
 			if (dev) {
 				connector->status =
 					connector_status_disconnected;
@@ -1214,14 +1225,153 @@ static void dp_off_by_hpd_plug(struct dp_device *dp)
 	}
 }
 
-/* Delayed Works */
-static void dp_work_hpd_plug(struct work_struct *work)
+static void dp_get_voltage_and_pre_emphasis_max_reach(u8 *voltage_swing,
+						    u8 *pre_emphasis, u8 *max_reach_value)
+{
+	int i;
+
+	for (i = 0; i < MAX_LANE_CNT; i++) {
+		if (voltage_swing[i] >= MAX_VOLTAGE_LEVEL)
+			max_reach_value[i] |= DP_TRAIN_MAX_SWING_REACHED;
+
+		if (pre_emphasis[i] >= MAX_PREEMPH_LEVEL)
+			max_reach_value[i] |= DP_TRAIN_MAX_PRE_EMPHASIS_REACHED;
+	}
+}
+
+static void dp_automated_test_set_lane_req(struct dp_device *dp, u8 *val)
+{
+	u8 voltage_swing[MAX_LANE_CNT];
+	u8 pre_emphasis[MAX_LANE_CNT];
+	u8 max_reach_value[MAX_LANE_CNT] = {0, };
+	u8 lanes_data[MAX_LANE_CNT];
+	int i;
+
+	voltage_swing[0] = (val[0] & DP_ADJUST_VOLTAGE_SWING_LANE0_MASK) >>
+			   DP_ADJUST_VOLTAGE_SWING_LANE0_SHIFT;
+	pre_emphasis[0]  = (val[0] & DP_ADJUST_PRE_EMPHASIS_LANE0_MASK) >>
+			   DP_ADJUST_PRE_EMPHASIS_LANE0_SHIFT;
+	voltage_swing[1] = (val[0] & DP_ADJUST_VOLTAGE_SWING_LANE1_MASK) >>
+			   DP_ADJUST_VOLTAGE_SWING_LANE1_SHIFT;
+	pre_emphasis[1]  = (val[0] & DP_ADJUST_PRE_EMPHASIS_LANE1_MASK) >>
+			   DP_ADJUST_PRE_EMPHASIS_LANE1_SHIFT;
+	voltage_swing[2] = (val[1] & DP_ADJUST_VOLTAGE_SWING_LANE0_MASK) >>
+			   DP_ADJUST_VOLTAGE_SWING_LANE0_SHIFT;
+	pre_emphasis[2]  = (val[1] & DP_ADJUST_PRE_EMPHASIS_LANE0_MASK) >>
+			   DP_ADJUST_PRE_EMPHASIS_LANE0_SHIFT;
+	voltage_swing[3] = (val[1] & DP_ADJUST_VOLTAGE_SWING_LANE1_MASK) >>
+			   DP_ADJUST_VOLTAGE_SWING_LANE1_SHIFT;
+	pre_emphasis[3]  = (val[1] & DP_ADJUST_PRE_EMPHASIS_LANE1_MASK) >>
+			   DP_ADJUST_PRE_EMPHASIS_LANE1_SHIFT;
+
+	for (i = 0; i < MAX_LANE_CNT; i++) {
+		dp_info(dp, "AutoTest: voltage swing[%d] = %x\n", i, voltage_swing[i]);
+		dp_info(dp, "AutoTest: pre_emphasis[%d] = %x\n", i, pre_emphasis[i]);
+	}
+
+	dp_hw_set_voltage_and_pre_emphasis(&dp->hw_config, voltage_swing, pre_emphasis);
+	dp_get_voltage_and_pre_emphasis_max_reach(voltage_swing, pre_emphasis,
+						max_reach_value);
+
+	lanes_data[0] = (pre_emphasis[0] << DP_TRAIN_PRE_EMPHASIS_SHIFT) |
+			voltage_swing[0] | max_reach_value[0];
+	lanes_data[1] = (pre_emphasis[1] << DP_TRAIN_PRE_EMPHASIS_SHIFT) |
+			voltage_swing[1] | max_reach_value[1];
+	lanes_data[2] = (pre_emphasis[2] << DP_TRAIN_PRE_EMPHASIS_SHIFT) |
+			voltage_swing[2] | max_reach_value[2];
+	lanes_data[3] = (pre_emphasis[3] << DP_TRAIN_PRE_EMPHASIS_SHIFT) |
+			voltage_swing[3] | max_reach_value[3];
+
+	dp_info(dp, "AutoTest: set %02x %02x %02x %02x\n",
+		lanes_data[0], lanes_data[1], lanes_data[2], lanes_data[3]);
+
+	drm_dp_dpcd_write(&dp->dp_aux, DP_TRAINING_LANE0_SET, lanes_data, MAX_LANE_CNT);
+}
+
+static int dp_automated_test_irq_handler(struct dp_device *dp)
+{
+	u8 dpcd_test_req = 0, dpcd_test_res = 0;
+	u8 dpcd_req_lane[2], dpcd_phy_test_pattern = 0;
+
+	drm_dp_dpcd_readb(&dp->dp_aux, DP_TEST_REQUEST, &dpcd_test_req);
+
+	dpcd_test_res = DP_TEST_ACK;
+	drm_dp_dpcd_writeb(&dp->dp_aux, DP_TEST_RESPONSE, dpcd_test_res);
+
+	if (dpcd_test_req & DP_TEST_LINK_PHY_TEST_PATTERN) {
+		dp_hw_stop();
+		msleep(120);
+
+		/* Set Swing & Preemp */
+		drm_dp_dpcd_read(&dp->dp_aux, DP_ADJUST_REQUEST_LANE0_1, dpcd_req_lane, 2);
+		dp_automated_test_set_lane_req(dp, dpcd_req_lane);
+
+		/* Set Quality Pattern */
+		drm_dp_dpcd_readb(&dp->dp_aux, DP_PHY_TEST_PATTERN, &dpcd_phy_test_pattern);
+		switch (dpcd_phy_test_pattern & DP_PHY_TEST_PATTERN_SEL_MASK) {
+		case DP_PHY_TEST_PATTERN_NONE:
+			dp_hw_set_quality_pattern(DISABLE_PATTERN, ENABLE_SCRAM);
+			break;
+		case DP_PHY_TEST_PATTERN_D10_2:
+			dp_hw_set_quality_pattern(D10_2_PATTERN, DISABLE_SCRAM);
+			break;
+		case DP_PHY_TEST_PATTERN_ERROR_COUNT:
+			dp_hw_set_quality_pattern(SERP_PATTERN, ENABLE_SCRAM);
+			break;
+		case DP_PHY_TEST_PATTERN_PRBS7:
+			dp_hw_set_quality_pattern(PRBS7, DISABLE_SCRAM);
+			break;
+		case DP_PHY_TEST_PATTERN_80BIT_CUSTOM:
+			dp_hw_set_quality_pattern(CUSTOM_80BIT, DISABLE_SCRAM);
+			break;
+		case DP_PHY_TEST_PATTERN_CP2520:
+			dp_hw_set_quality_pattern(HBR2_COMPLIANCE, ENABLE_SCRAM);
+			break;
+		default:
+			dp_err(dp, "Not Supported PHY_TEST_PATTERN: %02x\n", dpcd_phy_test_pattern);
+			break;
+		}
+	} else {
+		dp_err(dp, "Not Supported AUTOMATED_TEST_REQUEST: %02x\n", dpcd_test_req);
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int dp_sink_specific_irq_handler(struct dp_device *dp)
+{
+	/*
+	 * When DP Sink catches some error situations, it can trigger Sink Specific IRQ.
+	 * DP Source will handle DP Link Re-negotiation while keeping DP connection.
+	 */
+
+	/* Step_1. DP Off */
+	dp_off_by_hpd_plug(dp);
+
+	/* Step_2. DP Link Up again */
+	dp->typec_link_training_status = LINK_TRAINING_UNKNOWN;
+	if (dp_link_up(dp)) {
+		dp_err(dp, "failed to DP Link Up during re-negotiation\n");
+		dp->typec_link_training_status = LINK_TRAINING_FAILURE;
+		return -ENOLINK;
+	}
+	dp->typec_link_training_status = LINK_TRAINING_SUCCESS;
+
+	/* Step_3. DP On */
+	dp_on_by_hpd_plug(dp);
+
+	return 0;
+}
+
+/* Works */
+static void dp_work_hpd(struct work_struct *work)
 {
 	struct dp_device *dp = get_dp_drvdata();
 
-	if (dp_get_hpd_state(dp) == EXYNOS_HPD_PLUG) {
-		mutex_lock(&dp->hpd_lock);
+	mutex_lock(&dp->hpd_lock);
 
+	if (dp_get_hpd_state(dp) == EXYNOS_HPD_PLUG) {
 		/* Reset before performing link training */
 		dp->typec_link_training_status = LINK_TRAINING_UNKNOWN;
 
@@ -1234,7 +1384,6 @@ static void dp_work_hpd_plug(struct work_struct *work)
 		/* PHY power on */
 		usleep_range(10000, 10030);
 		dp_hw_init(&dp->hw_config); /* for AUX ch read/write. */
-		hdcp_dplink_connect_state(DP_CONNECT);
 		usleep_range(10000, 11000);
 
 		if (dp_check_dp_sink(dp) < 0) {
@@ -1249,9 +1398,27 @@ static void dp_work_hpd_plug(struct work_struct *work)
 		dp->typec_link_training_status = LINK_TRAINING_SUCCESS;
 
 		dp_on_by_hpd_plug(dp);
+	} else if (dp_get_hpd_state(dp) == EXYNOS_HPD_UNPLUG) {
+		dp_off_by_hpd_plug(dp);
+		dp_link_down(dp);
 
-		mutex_unlock(&dp->hpd_lock);
+		/* PHY power off */
+		dp_hw_deinit(&dp->hw_config);
+		dp_disable_dposc(dp);
+
+		pm_runtime_put_sync(dp->dev);
+		dp_debug(dp, "pm_rtm_put_sync usage_cnt(%d)\n",
+			 atomic_read(&dp->dev->power.usage_count));
+		pm_relax(dp->dev);
+
+		dp->state = DP_STATE_INIT;
+		dp_info(dp, "%s: DP State changed to INIT\n", __func__);
+
+		/* Mark unknown on cable disconnect as well */
+		dp->typec_link_training_status = LINK_TRAINING_UNKNOWN;
 	}
+
+	mutex_unlock(&dp->hpd_lock);
 
 	return;
 
@@ -1277,51 +1444,32 @@ HPD_FAIL:
 	mutex_unlock(&dp->hpd_lock);
 }
 
-static void dp_work_hpd_unplug(struct work_struct *work)
-{
-	struct dp_device *dp = get_dp_drvdata();
-
-	if (dp_get_hpd_state(dp) == EXYNOS_HPD_UNPLUG) {
-		mutex_lock(&dp->hpd_lock);
-		hdcp_dplink_connect_state(DP_DISCONNECT);
-		dp_off_by_hpd_plug(dp);
-		dp_link_down(dp);
-
-		/* PHY power off */
-		dp_hw_deinit(&dp->hw_config);
-		dp_disable_dposc(dp);
-
-		pm_runtime_put_sync(dp->dev);
-		dp_debug(dp, "pm_rtm_put_sync usage_cnt(%d)\n",
-			 atomic_read(&dp->dev->power.usage_count));
-		pm_relax(dp->dev);
-
-		dp->state = DP_STATE_INIT;
-		dp_info(dp, "%s: DP State changed to INIT\n", __func__);
-
-		/* Mark unknown on cable disconnect as well */
-		dp->typec_link_training_status = LINK_TRAINING_UNKNOWN;
-
-		mutex_unlock(&dp->hpd_lock);
-	}
-}
+static u8 sysfs_triggered_irq = 0;
 
 static void dp_work_hpd_irq(struct work_struct *work)
 {
 	struct dp_device *dp = get_dp_drvdata();
 	u8 irq = 0;
 
-	if (drm_dp_dpcd_readb(&dp->dp_aux, DP_DEVICE_SERVICE_IRQ_VECTOR,
-		&irq) <= 0)
+	if (sysfs_triggered_irq != 0) {
+		irq = sysfs_triggered_irq;
+		sysfs_triggered_irq = 0;
+	} else if (drm_dp_dpcd_readb(&dp->dp_aux, DP_DEVICE_SERVICE_IRQ_VECTOR, &irq) <= 0) {
+		dp_err(dp, "[HPD IRQ] cannot read DP_DEVICE_SERVICE_IRQ_VECTOR\n");
 		return;
+	}
 
 	if (irq & DP_CP_IRQ) {
-		dp_info(dp, "occurred Content Protection IRQ\n");
+		dp_info(dp, "[HPD IRQ] Content Protection\n");
 		hdcp_dplink_handle_irq();
 	} else if (irq & DP_AUTOMATED_TEST_REQUEST) {
-		dp_info(dp, "occurred Automated Test Request IRQ\n");
+		dp_info(dp, "[HPD IRQ] Automated Test Request\n");
+		dp_automated_test_irq_handler(dp);
+	} else if (irq & DP_SINK_SPECIFIC_IRQ) {
+		dp_info(dp, "[HPD IRQ] Sink Specific\n");
+		dp_sink_specific_irq_handler(dp);
 	} else
-		dp_info(dp, "occurred unknown IRQ (0x%X)\n", irq);
+		dp_info(dp, "[HPD IRQ] unknown IRQ (0x%X)\n", irq);
 }
 
 /* Type-C Handshaking Functions */
@@ -1332,23 +1480,27 @@ static void dp_hpd_changed(struct dp_device *dp, enum hotplug_state state)
 		return;
 	}
 
-	if (state == EXYNOS_HPD_PLUG) {
-		dp_info(dp, "DP HPD changed to EXYNOS_HPD_PLUG\n");
+	if ((state == EXYNOS_HPD_PLUG) || (state == EXYNOS_HPD_UNPLUG)) {
 		dp_set_hpd_state(dp, state);
-		queue_delayed_work(dp->dp_wq, &dp->hpd_plug_work, 0);
-	} else if (state == EXYNOS_HPD_UNPLUG) {
-		dp_info(dp, "DP HPD changed to EXYNOS_HPD_UNPLUG\n");
-		dp_set_hpd_state(dp, state);
-		queue_delayed_work(dp->dp_wq, &dp->hpd_unplug_work, 0);
+		queue_work(dp->dp_wq, &dp->hpd_work);
 	} else
 		dp_err(dp, "DP HPD changed to abnormal state(%d)\n", state);
 }
+
+static bool dp_enabled = false;
+module_param(dp_enabled, bool, 0664);
+MODULE_PARM_DESC(dp_enabled, "Enable/disable DP notification processing");
 
 /*
  * Function should be called with typec_notification_lock held.
  */
 static int usb_typec_dp_notification_locked(struct dp_device *dp, enum hotplug_state hpd)
 {
+	if (!dp_enabled) {
+		dp_info(dp, "%s: DP is disabled, ignoring DP notifications\n", __func__);
+		return NOTIFY_OK;
+	}
+
 	if (hpd == EXYNOS_HPD_PLUG) {
 		if (dp_get_hpd_state(dp) == EXYNOS_HPD_UNPLUG) {
 			dp_info(dp, "%s: USB Type-C is HPD PLUG status\n", __func__);
@@ -1362,9 +1514,11 @@ static int usb_typec_dp_notification_locked(struct dp_device *dp, enum hotplug_s
 			dp->hw_config.pin_type = dp->typec_pin_assignment;
 
 			dp_hpd_changed(dp, EXYNOS_HPD_PLUG);
-		} else {
-			dp_warn(dp, "%s: IRQ from sink\n", __func__);
-			queue_delayed_work(dp->dp_wq, &dp->hpd_irq_work, 0);
+		}
+	} else if (hpd == EXYNOS_HPD_IRQ) {
+		if (dp_get_hpd_state(dp) == EXYNOS_HPD_PLUG) {
+			dp_info(dp, "%s: Service IRQ from sink\n", __func__);
+			queue_work(dp->dp_wq, &dp->hpd_irq_work);
 		}
 	} else {
 		dp_info(dp, "%s: USB Type-C is HPD UNPLUG status, or not in display ALT mode\n",
@@ -1711,56 +1865,59 @@ static irqreturn_t dp_irq_handler(int irq, void *dev_data)
 	return IRQ_HANDLED;
 }
 
-static int dp_init_resources(struct dp_device *dp, struct platform_device *pdev)
+static int dp_remap_regs(struct dp_device *dp, struct platform_device *pdev)
 {
-	struct resource *res;
-#ifdef CONFIG_SOC_ZUMA
-	u64 addr_phy = 0x11130000, addr_phy_tca = 0x11140000;
-	u64 size_phy = 0x250, size_phy_tca = 0xFC;
-#else
-	u64 addr_phy = 0x110F0000;
-	u64 size_phy = 0x2800;
-#endif
-	int ret = 0;
+	struct resource res;
+	struct device *dev = dp->dev;
+	struct device_node *np = dev->of_node;
+	int i, ret = 0;
 
 	/* DP Link SFR */
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		dp_err(dp, "failed to get mem resource\n");
-		return -ENOENT;
-	}
-
-	dp->res.link_regs = devm_ioremap_resource(dp->dev, res);
+	dp->res.link_regs = devm_platform_ioremap_resource_byname(pdev, "link");
 	if (IS_ERR(dp->res.link_regs)) {
 		dp_err(dp, "failed to remap DP LINK SFR region\n");
-		return -EINVAL;
+		ret = PTR_ERR(dp->res.link_regs);
+		goto err;
 	}
-	dp_regs_desc_init(dp->res.link_regs, res->start, "LINK", REGS_LINK,
-			  SST1);
+	dp_regs_desc_init(dp->res.link_regs, res.start, "LINK", REGS_LINK, SST1);
 
 	/* USBDP Combo PHY SFR */
-	// ToDo: USBDP PHY is shared with USB Driver.
-	// In order to avoid double resource mapping, here uses hard-code.
-	// Need to revisit
-	dp->res.phy_regs = ioremap((phys_addr_t)addr_phy, size_phy);
+	/*
+	 * PHY HW is a Combo PHY for USB and DP.
+	 * USB is master IP for this PHY and controlled the life cycle of it.
+	 * To avoid abnormal clean-up the resource, it doesn't use managed resource.
+	 */
+	i = of_property_match_string(np, "reg-names", "phy");
+	if (of_address_to_resource(np, i, &res)) {
+		dp_err(dp, "failed to get USB/DP Combo PHY resource\n");
+		goto err;
+	}
+
+	dp->res.phy_regs = ioremap(res.start, resource_size(&res));
 	if (IS_ERR(dp->res.phy_regs)) {
-		dp_err(dp, "failed to remap USBDP Combo PHY SFR region\n");
-		return -EINVAL;
+		dp_err(dp, "failed to remap USB/DP Combo PHY SFR region\n");
+		ret = PTR_ERR(dp->res.phy_regs);
+		goto err;
 	}
-	dp_regs_desc_init(dp->res.phy_regs, (phys_addr_t)addr_phy, "PHY",
-			  REGS_PHY, SST1);
+	dp_regs_desc_init(dp->res.phy_regs, res.start, "PHY", REGS_PHY, SST1);
 
-#ifdef CONFIG_SOC_ZUMA
-	dp->res.phy_tca_regs = ioremap((phys_addr_t)addr_phy_tca, size_phy_tca);
-	if (!dp->res.phy_tca_regs) {
-		dp_err(dp, "failed to remap USBDP Combo PHY TCA SFR region\n");
-		return -EINVAL;
-	}
-	dp_regs_desc_init(dp->res.phy_tca_regs, (phys_addr_t)addr_phy_tca,
-			  "PHY TCA", REGS_PHY_TCA, SST1);
-#endif
+	if (dp_remap_regs_other(dp))
+		goto err_phy;
 
-	/* DP Interrupt */
+	return 0;
+
+err_phy:
+	if (dp->res.phy_regs)
+		iounmap(dp->res.phy_regs);
+err:
+	return ret;
+}
+
+static int dp_register_irq(struct dp_device *dp, struct platform_device *pdev)
+{
+	struct resource *res;
+	int ret = 0;
+
 	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
 	if (!res) {
 		dp_err(dp, "failed to get irq resource\n");
@@ -1776,9 +1933,28 @@ static int dp_init_resources(struct dp_device *dp, struct platform_device *pdev)
 	}
 	disable_irq(dp->res.irq);
 
+	return 0;
+}
+
+static int dp_init_resources(struct dp_device *dp, struct platform_device *pdev)
+{
+	int ret = 0;
+
+	ret = dp_remap_regs(dp, pdev);
+	if (ret) {
+		dp_err(dp, "failed to remap DP registers\n");
+		return -EINVAL;
+	}
+
 	ret = dp_get_clock(dp);
 	if (ret) {
 		dp_err(dp, "failed to get DP clks\n");
+		return -EINVAL;
+	}
+
+	ret = dp_register_irq(dp, pdev);
+	if (ret) {
+		dp_err(dp, "failed to get DP interrupts\n");
 		return -EINVAL;
 	}
 
@@ -1885,11 +2061,91 @@ static ssize_t irq_hpd_store(struct device *dev, struct device_attribute *attr, 
 	struct dp_device *dp = dev_get_drvdata(dev);
 
 	mutex_lock(&dp->typec_notification_lock);
-	usb_typec_dp_notification_locked(dp, EXYNOS_HPD_PLUG);
+	usb_typec_dp_notification_locked(dp, EXYNOS_HPD_IRQ);
 	mutex_unlock(&dp->typec_notification_lock);
 	return size;
 }
 static DEVICE_ATTR_WO(irq_hpd);
+
+static const char *const link_rate_opts[] = {
+	[DP_LINK_RATE_RBR] = "RBR",
+	[DP_LINK_RATE_HBR] = "HBR",
+	[DP_LINK_RATE_HBR2] = "HBR2",
+	[DP_LINK_RATE_HBR3] = "HBR3",
+};
+
+static ssize_t link_rate_store(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t size)
+{
+	struct dp_device *dp = dev_get_drvdata(dev);
+	int link_rate = sysfs_match_string(link_rate_opts, buf);
+
+	if (link_rate < 0)
+		return -EINVAL;
+
+	dp_rate = link_rate;
+	dp_fill_host_caps(dp);
+
+	return size;
+}
+
+static ssize_t link_rate_show(struct device *dev, struct device_attribute *attr,
+				char *buf)
+{
+	return sysfs_emit(buf, "%s\n", link_rate_opts[dp_rate]);
+}
+static DEVICE_ATTR_RW(link_rate);
+
+static ssize_t link_lanes_store(struct device *dev, struct device_attribute *attr,
+				const char *buf, size_t size)
+{
+	struct dp_device *dp = dev_get_drvdata(dev);
+	unsigned long link_lanes;
+
+	if (kstrtoul(buf, 10, &link_lanes) != 0)
+		return -EINVAL;
+
+	if (link_lanes != 1 && link_lanes != 2 && link_lanes != 4)
+		return -EINVAL;
+
+	dp_lanes = link_lanes;
+	dp_fill_host_caps(dp);
+
+	return size;
+}
+
+static ssize_t link_lanes_show(struct device *dev, struct device_attribute *attr,
+				char *buf)
+{
+	return sysfs_emit(buf, "%lu\n", dp_lanes);
+}
+static DEVICE_ATTR_RW(link_lanes);
+
+static ssize_t trigger_automated_test_irq_store(struct device *dev, struct device_attribute *attr,
+						const char *buf, size_t size)
+{
+	struct dp_device *dp = dev_get_drvdata(dev);
+
+	mutex_lock(&dp->typec_notification_lock);
+	sysfs_triggered_irq = DP_AUTOMATED_TEST_REQUEST;
+	usb_typec_dp_notification_locked(dp, EXYNOS_HPD_IRQ);
+	mutex_unlock(&dp->typec_notification_lock);
+	return size;
+}
+static DEVICE_ATTR_WO(trigger_automated_test_irq);
+
+static ssize_t trigger_sink_specific_irq_store(struct device *dev, struct device_attribute *attr,
+					       const char *buf, size_t size)
+{
+	struct dp_device *dp = dev_get_drvdata(dev);
+
+	mutex_lock(&dp->typec_notification_lock);
+	sysfs_triggered_irq = DP_SINK_SPECIFIC_IRQ;
+	usb_typec_dp_notification_locked(dp, EXYNOS_HPD_IRQ);
+	mutex_unlock(&dp->typec_notification_lock);
+	return size;
+}
+static DEVICE_ATTR_WO(trigger_sink_specific_irq);
 
 static struct attribute *dp_attrs[] = {
 	&dev_attr_orientation.attr,
@@ -1897,6 +2153,10 @@ static struct attribute *dp_attrs[] = {
 	&dev_attr_hpd.attr,
 	&dev_attr_link_status.attr,
 	&dev_attr_irq_hpd.attr,
+	&dev_attr_link_rate.attr,
+	&dev_attr_link_lanes.attr,
+	&dev_attr_trigger_automated_test_irq.attr,
+	&dev_attr_trigger_sink_specific_irq.attr,
 	NULL
 };
 
@@ -1951,7 +2211,7 @@ static int dp_probe(struct platform_device *pdev)
 	mutex_init(&dp->training_lock);
 	mutex_init(&dp->typec_notification_lock);
 
-	/* Create WorkQueue & Delayed Works*/
+	/* Create WorkQueue & Works for HPD */
 	dp->dp_wq = create_singlethread_workqueue(dev_name(&pdev->dev));
 	if (!dp->dp_wq) {
 		dp_err(dp, "create wq failed.\n");
@@ -1959,9 +2219,8 @@ static int dp_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	INIT_DELAYED_WORK(&dp->hpd_plug_work, dp_work_hpd_plug);
-	INIT_DELAYED_WORK(&dp->hpd_unplug_work, dp_work_hpd_unplug);
-	INIT_DELAYED_WORK(&dp->hpd_irq_work, dp_work_hpd_irq);
+	INIT_WORK(&dp->hpd_work, dp_work_hpd);
+	INIT_WORK(&dp->hpd_irq_work, dp_work_hpd_irq);
 
 	pm_runtime_enable(dev);
 

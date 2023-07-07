@@ -18,6 +18,7 @@
 #include <cal_config.h>
 #include <decon_cal.h>
 #include <dqe_cal.h>
+#include <trace/dpu_trace.h>
 #ifdef __linux__
 #include "../exynos_drm_decon.h"
 #include <linux/of_address.h>
@@ -1412,6 +1413,8 @@ int decon_dsc_reg_init(u32 id, struct decon_config *config, u32 overlap_w,
 	u32 dsc_id;
 	struct decon_dsc dsc_enc;
 
+	DPU_ATRACE_BEGIN(__func__);
+
 	/* Basically, all SW-resets in DPU are not necessary */
 	if (swrst) {
 		for (dsc_id = 0; dsc_id < config->dsc.dsc_count; dsc_id++)
@@ -1423,6 +1426,8 @@ int decon_dsc_reg_init(u32 id, struct decon_config *config, u32 overlap_w,
 	decon_reg_config_data_path_size(id, dsc_enc.width_per_enc,
 			config->image_height, overlap_w, &dsc_enc,
 			&config->dsc);
+
+	DPU_ATRACE_END(__func__);
 
 	return 0;
 }
@@ -1457,10 +1462,7 @@ static void decon_reg_configure_lcd(u32 id, struct decon_config *config)
 
 	decon_reg_set_data_path(id, config);
 
-	if (config->dsc.enabled) {
-		/* call decon_reg_config_data_path_size () inside */
-		decon_dsc_reg_init(id, config, overlap_w, 0);
-	} else {
+	if (!config->dsc.enabled) {
 		decon_reg_config_data_path_size(id, config->image_width,
 				config->image_height, overlap_w, NULL,
 				&config->dsc);
@@ -1797,22 +1799,19 @@ static void decon_reg_set_dither_path(u32 id, bool en)
 
 static void decon_reg_set_urgent(u32 id, struct decon_config *config)
 {
-	// Only set urgent for DECON0 now
-	if (id == 0) {
-		decon_reg_set_rd_urgent_enable(id, config->urgent.rd_en);
-		decon_reg_set_rd_urgent_threshold(id,
-						  config->urgent.rd_hi_thres,
-						  config->urgent.rd_lo_thres);
-		decon_reg_set_rd_wait_cycle(id, config->urgent.rd_wait_cycle);
-		decon_reg_set_wr_urgent_enable(id, config->urgent.wr_en);
-		decon_reg_set_wr_urgent_threshold(id,
-						  config->urgent.wr_hi_thres,
-						  config->urgent.wr_lo_thres);
-		decon_reg_set_dta_enable(id, config->urgent.dta_en);
-		decon_reg_set_dta_threshold(id,
-					    config->urgent.dta_hi_thres,
-					    config->urgent.dta_lo_thres);
-	}
+	decon_reg_set_rd_urgent_enable(id, config->urgent.rd_en);
+	decon_reg_set_rd_urgent_threshold(id,
+					  config->urgent.rd_hi_thres,
+					  config->urgent.rd_lo_thres);
+	decon_reg_set_rd_wait_cycle(id, config->urgent.rd_wait_cycle);
+	decon_reg_set_wr_urgent_enable(id, config->urgent.wr_en);
+	decon_reg_set_wr_urgent_threshold(id,
+					  config->urgent.wr_hi_thres,
+					  config->urgent.wr_lo_thres);
+	decon_reg_set_dta_enable(id, config->urgent.dta_en);
+	decon_reg_set_dta_threshold(id,
+				    config->urgent.dta_hi_thres,
+				    config->urgent.dta_lo_thres);
 }
 
 /******************** EXPORTED DECON CAL APIs ********************/
