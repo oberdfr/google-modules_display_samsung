@@ -231,6 +231,9 @@ static int exynos_panel_parse_gpios(struct exynos_panel *ctx)
 	if (IS_ERR(ctx->enable_gpio))
 		ctx->enable_gpio = NULL;
 
+	ctx->vddd_gpio = devm_gpiod_get(dev, "vddd", GPIOD_OUT_HIGH);
+	if (IS_ERR(ctx->vddd_gpio))
+		ctx->vddd_gpio = NULL;
 	dev_dbg(ctx->dev, "%s -\n", __func__);
 	return 0;
 }
@@ -509,12 +512,17 @@ EXPORT_SYMBOL(exynos_panel_reset);
 
 static void _exynos_panel_set_vddd_voltage(struct exynos_panel *ctx, bool is_lp)
 {
-	u32 uv = is_lp ? ctx->vddd_lp_uV : ctx->vddd_normal_uV;
+	if (!IS_ERR_OR_NULL(ctx->vddd_gpio)) {
+		gpiod_set_value(ctx->vddd_gpio, is_lp ? 0 : 1);
+	} else {
+		u32 uv = is_lp ? ctx->vddd_lp_uV : ctx->vddd_normal_uV;
 
-	if (!uv || !ctx->vddd)
-		return;
-	if (regulator_set_voltage(ctx->vddd, uv, uv))
-		dev_err(ctx->dev, "failed to set vddd at %u uV\n", uv);
+		if (!uv || !ctx->vddd)
+			return;
+
+		if (regulator_set_voltage(ctx->vddd, uv, uv))
+			dev_err(ctx->dev, "failed to set vddd at %u uV\n", uv);
+	}
 }
 
 static int _exynos_panel_reg_ctrl(struct exynos_panel *ctx,

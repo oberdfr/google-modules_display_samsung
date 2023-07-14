@@ -674,6 +674,7 @@ struct exynos_panel {
 	struct regulator *vci;
 	struct regulator *vddi;
 	struct regulator *vddd;
+	struct gpio_desc *vddd_gpio;
 	struct regulator *vddr_en;
 	struct regulator *vddr;
 	u32 vddd_normal_uV;
