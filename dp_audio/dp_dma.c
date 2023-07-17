@@ -893,6 +893,8 @@ static const struct snd_soc_component_driver dp_dma_cmpnt_drv = {
 };
 
 static const struct snd_soc_dai_driver dp_dma_dai_drv = {
+	.name = "dp0-dma",
+	.id = 0,
 	.playback = {
 		.stream_name = "Playback",
 		.channels_min = 1,
