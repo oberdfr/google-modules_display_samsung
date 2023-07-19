@@ -574,7 +574,7 @@ static void decon_reg_config_data_path_size(u32 id, u32 width, u32 height,
 	if (dsc->enabled) {
 		width_f = p->width_per_enc;
 		/* OUTFIFO_COMPRESSED_SLICE_WIDTH must be a multiple of 2 */
-		comp_slice_width = get_comp_dsc_width(dsc);
+		comp_slice_width = decon_get_comp_dsc_width(dsc);
 		if (dsc->dsc_count == 1) {
 			decon_reg_set_outfifo_size_ctl0(id, width_f, height);
 			decon_reg_set_outfifo_size_ctl2(id,
