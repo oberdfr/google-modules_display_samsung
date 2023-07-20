@@ -92,7 +92,7 @@ static inline u32 get_comp_dsc_width(const struct exynos_dsc *dsc)
 
 static inline u32 decon_get_comp_dsc_width(const struct exynos_dsc *dsc)
 {
-	return DIV_ROUND_UP(dsc->slice_width, 3);
+	return ALIGN(DIV_ROUND_UP(dsc->slice_width, 3), 2);
 }
 
 #endif /* __EXYNOS_PANEL_H__ */
