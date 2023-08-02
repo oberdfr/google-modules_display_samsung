@@ -82,6 +82,7 @@
 #define HBM_FLAG_BL_UPDATE      BIT(1)
 #define HBM_FLAG_LHBM_UPDATE    BIT(2)
 #define HBM_FLAG_DIMMING_UPDATE BIT(3)
+#define HBM_FLAG_OP_RATE_UPDATE BIT(4)
 
 #define IS_HBM_ON(mode)	((mode) >= HBM_ON_IRC_ON && (mode) < HBM_STATE_MAX)
 #define IS_HBM_ON_IRC_OFF(mode)	(((mode) == HBM_ON_IRC_OFF))
@@ -150,6 +151,12 @@ struct exynos_panel_te2_timing {
 	u16 rising_edge;
 	/* @falling_edge: vertical end point */
 	u16 falling_edge;
+};
+
+enum exynos_acl_mode {
+	ACL_OFF = 0,
+	ACL_NORMAL,
+	ACL_ENHANCED,
 };
 
 /**
@@ -283,7 +290,7 @@ struct exynos_panel_funcs {
 	 * enablement. If this is not defined, it means that panel does not
 	 * support acl.
 	 */
-	void (*set_acl_mode)(struct exynos_panel *exynos_panel, bool on);
+	void (*set_acl_mode)(struct exynos_panel *exynos_panel, enum exynos_acl_mode mode);
 
 	/**
 	 * @set_power:
@@ -569,6 +576,7 @@ struct exynos_panel_desc {
 	bool dbv_extra_frame;
 	bool is_partial;
 	bool is_panel_idle_supported;
+	bool refresh_on_lp;
 	/**
 	 * set true if the panel doesn't have lhbm common hw constraints, include
 	 * 1. only allow turn on lhbm at peak refresh rate
@@ -582,6 +590,11 @@ struct exynos_panel_desc {
 	bool no_lhbm_rr_constraints;
 	const u32 lhbm_post_cmd_delay_frames;
 	const u32 lhbm_effective_delay_frames;
+	/**
+	 * Indicate how many frames are needed at least before sending lhbm on commands
+	 * while exiting from AoD mode. Default 0 means no such constraint.
+	 */
+	const u32 lhbm_on_delay_frames;
 	const unsigned int delay_dsc_reg_init_us;
 	const struct brightness_capability *brt_capability;
 	const u32 *bl_range;
@@ -656,8 +669,6 @@ struct exynos_panel {
 	struct device *dev;
 	struct drm_panel panel;
 	struct drm_crtc *crtc;
-	struct dentry *debugfs_entry;
-	struct dentry *debugfs_cmdset_entry;
 	struct gpio_desc *reset_gpio;
 	struct gpio_desc *enable_gpio;
 	struct regulator *vci;
@@ -758,8 +769,8 @@ struct exynos_panel {
 	/* TE width before last rr command was sent */
 	u32 last_rr_te_usec;
 
-        /* Automatic Current Limiting(ACL) */
-	bool acl_mode;
+	/* Automatic Current Limiting(ACL) */
+	enum exynos_acl_mode acl_mode;
 
 	struct {
 		struct local_hbm {
@@ -782,6 +793,7 @@ struct exynos_panel {
 			u32 frame_index;
 			ktime_t last_vblank_ts;
 			bool post_work_disabled;
+			u64 last_lp_vblank_cnt;
 		} local_hbm;
 
 		struct workqueue_struct *wq;

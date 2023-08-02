@@ -773,14 +773,36 @@ int exynos_panel_get_modes(struct drm_panel *panel, struct drm_connector *connec
 }
 EXPORT_SYMBOL(exynos_panel_get_modes);
 
+static void _exynos_panel_disable_normal_feat_locked(struct exynos_panel *ctx)
+{
+	const struct exynos_panel_funcs *funcs = ctx->desc->exynos_panel_func;
+	bool is_lhbm_enabled = !is_local_hbm_disabled(ctx);
+	bool is_hbm_enabled = IS_HBM_ON(ctx->hbm_mode);
+
+	if (is_lhbm_enabled && funcs && funcs->set_local_hbm_mode) {
+		ctx->hbm.local_hbm.requested_state = LOCAL_HBM_DISABLED;
+		panel_update_local_hbm_locked(ctx);
+		/* restore the state while calling restore function */
+		ctx->hbm.local_hbm.requested_state = LOCAL_HBM_ENABLED;
+	}
+	/* TODO: restore hbm if needed */
+	if (is_hbm_enabled && funcs && funcs->set_hbm_mode)
+		funcs->set_hbm_mode(ctx, HBM_OFF);
+
+	if (!is_lhbm_enabled && !is_hbm_enabled)
+		return;
+
+	dev_warn(ctx->dev,
+		"%s: unexpected lhbm(%d) or hbm(%d) @ %s, force off to avoid unpredictable issue\n",
+		__func__, is_lhbm_enabled, is_hbm_enabled, (!ctx->enabled) ? "OFF" : "ON or LP");
+}
+
 int exynos_panel_disable(struct drm_panel *panel)
 {
 	struct exynos_panel *ctx =
 		container_of(panel, struct exynos_panel, panel);
-	const struct exynos_panel_funcs *exynos_panel_func;
 
 	ctx->enabled = false;
-	ctx->hbm_mode = HBM_OFF;
 	ctx->dimming_on = false;
 	ctx->self_refresh_active = false;
 	ctx->panel_idle_vrefresh = 0;
@@ -788,23 +810,7 @@ int exynos_panel_disable(struct drm_panel *panel)
 	ctx->cabc_mode = CABC_OFF;
 
 	mutex_lock(&ctx->mode_lock);
-	exynos_panel_func = ctx->desc->exynos_panel_func;
-	if (exynos_panel_func) {
-		if (exynos_panel_func->set_local_hbm_mode) {
-			bool is_forced_off = false;
-
-			ctx->hbm.local_hbm.requested_state = LOCAL_HBM_DISABLED;
-			if (!is_local_hbm_disabled(ctx)) {
-				is_forced_off = true;
-				dev_dbg(ctx->dev, "%s: force disabling lhbm\n", __func__);
-			}
-			panel_update_local_hbm_locked(ctx);
-
-			/* restore the state while enabling panel if needed */
-			if (is_forced_off)
-				ctx->hbm.local_hbm.requested_state = LOCAL_HBM_ENABLED;
-		}
-	}
+	_exynos_panel_disable_normal_feat_locked(ctx);
 	exynos_panel_send_cmd_set(ctx, ctx->desc->off_cmd_set);
 	mutex_unlock(&ctx->mode_lock);
 	dev_dbg(ctx->dev, "%s\n", __func__);
@@ -1628,21 +1634,42 @@ static ssize_t available_osc2_clk_khz_show(struct device *dev, struct device_att
 	return len;
 }
 
+static int exynos_panel_set_op_hz(struct exynos_panel *ctx, unsigned int hz)
+{
+	const struct exynos_panel_funcs *funcs = ctx->desc->exynos_panel_func;
+	int ret = 0;
+
+	if (!is_panel_initialized(ctx))
+		return -EAGAIN;
+
+	if (!funcs || !funcs->set_op_hz)
+		return -EINVAL;
+
+	mutex_lock(&ctx->mode_lock);
+	if (ctx->op_hz != hz) {
+		ret = funcs->set_op_hz(ctx, hz);
+		if (ret)
+			dev_err(ctx->dev, "failed to set op rate: %u Hz\n", hz);
+		else
+			sysfs_notify(&ctx->dev->kobj, NULL, "op_hz");
+	} else {
+		dev_dbg(ctx->dev, "%s: skip the same op rate: %u Hz\n", __func__, hz);
+	}
+	mutex_unlock(&ctx->mode_lock);
+
+	return ret;
+}
+
 static ssize_t op_hz_store(struct device *dev,
 				struct device_attribute *attr,
 				const char *buf, size_t count)
 {
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
 	struct exynos_panel *ctx = mipi_dsi_get_drvdata(dsi);
-	const struct exynos_panel_funcs *funcs = ctx->desc->exynos_panel_func;
 	ssize_t ret;
 	u32 hz;
 
-	if (!is_panel_initialized(ctx))
-		return -EAGAIN;
-
-	/* sysfs is not accessible for the panel not supporting op_hz */
-	if (!count || !funcs || !funcs->set_op_hz)
+	if (!count)
 		return -EINVAL;
 
 	ret = kstrtou32(buf, 0, &hz);
@@ -1651,20 +1678,9 @@ static ssize_t op_hz_store(struct device *dev,
 		return ret;
 	}
 
-	if (ctx->op_hz == hz) {
-		dev_dbg(ctx->dev, "%s: skip the same op rate: %u Hz\n", __func__, hz);
-		return count;
-	}
-
-	mutex_lock(&ctx->mode_lock);
-	ret = funcs->set_op_hz(ctx, hz);
-	mutex_unlock(&ctx->mode_lock);
-	if (ret) {
-		dev_err(ctx->dev, "failed to set op rate: %u Hz\n", hz);
+	ret = exynos_panel_set_op_hz(ctx, hz);
+	if (ret)
 		return ret;
-	}
-
-	sysfs_notify(&ctx->dev->kobj, NULL, "op_hz");
 
 	return count;
 }
@@ -1906,6 +1922,9 @@ static int exynos_panel_connector_get_property(
 	} else if (property == p->dimming_on) {
 		*val = exynos_state->dimming_on;
 		dev_dbg(ctx->dev, "%s: dimming_on(%s)\n", __func__, *val ? "true" : "false");
+	} else if (property == p->operation_rate) {
+		*val = exynos_state->operation_rate;
+		dev_dbg(ctx->dev, "%s: operation_rate(%llu)\n", __func__, *val);
 	} else if (property == p->lp_mode) {
 		return exynos_panel_get_lp_mode(exynos_connector, exynos_state, val);
 	} else if (property == p->mipi_sync) {
@@ -1946,6 +1965,10 @@ static int exynos_panel_connector_set_property(
 		exynos_state->dimming_on = val;
 		dev_dbg(ctx->dev, "%s: dimming_on(%s)\n", __func__,
 			 exynos_state->dimming_on ? "true" : "false");
+	} else if (property == p->operation_rate) {
+		exynos_state->pending_update_flags |= HBM_FLAG_OP_RATE_UPDATE;
+		exynos_state->operation_rate = val;
+		dev_dbg(ctx->dev, "%s: operation_rate(%u)\n", __func__, exynos_state->operation_rate);
 	} else if (property == p->mipi_sync) {
 		exynos_state->mipi_sync = val;
 		dev_dbg(ctx->dev, "%s: mipi_sync(0x%lx)\n", __func__, exynos_state->mipi_sync);
@@ -1990,6 +2013,36 @@ static void exynos_panel_set_cabc(struct exynos_panel *ctx, enum exynos_cabc_mod
 	mutex_unlock(&ctx->mode_lock);
 }
 
+static void exynos_panel_lhbm_on_delay_frames(struct drm_crtc *crtc,
+						struct exynos_panel *ctx)
+{
+	u64 last_vblank_cnt = ctx->hbm.local_hbm.last_lp_vblank_cnt;
+
+	if (!ctx->desc->lhbm_on_delay_frames || !last_vblank_cnt)
+		return;
+
+	DPU_ATRACE_BEGIN("lhbm_on_delay_frames");
+	if (crtc && !drm_crtc_vblank_get(crtc)) {
+		int retry = ctx->desc->lhbm_on_delay_frames;
+
+		do {
+			u32 diff = 0;
+			u64 cur_vblank_cnt = drm_crtc_vblank_count(crtc);
+
+			if (cur_vblank_cnt > last_vblank_cnt)
+				diff = cur_vblank_cnt - last_vblank_cnt;
+
+			if (diff < ctx->desc->lhbm_on_delay_frames)
+				drm_crtc_wait_one_vblank(crtc);
+			else
+				break;
+		} while (--retry);
+		drm_crtc_vblank_put(crtc);
+	}
+	ctx->hbm.local_hbm.last_lp_vblank_cnt = 0;
+	DPU_ATRACE_END("lhbm_on_delay_frames");
+}
+
 static void exynos_panel_pre_commit_properties(
 				struct exynos_panel *ctx,
 				struct exynos_drm_connector_state *conn_state)
@@ -1998,6 +2051,7 @@ static void exynos_panel_pre_commit_properties(
 	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
 	bool mipi_sync;
 	bool ghbm_updated = false;
+	const unsigned int normal_feat_flags = HBM_FLAG_GHBM_UPDATE | HBM_FLAG_LHBM_UPDATE;
 
 	if (!conn_state->pending_update_flags)
 		return;
@@ -2006,19 +2060,23 @@ static void exynos_panel_pre_commit_properties(
 	mipi_sync = conn_state->mipi_sync &
 		(MIPI_CMD_SYNC_LHBM | MIPI_CMD_SYNC_GHBM | MIPI_CMD_SYNC_BL);
 
-	if ((conn_state->mipi_sync & (MIPI_CMD_SYNC_LHBM | MIPI_CMD_SYNC_GHBM)) &&
+	if ((conn_state->pending_update_flags & normal_feat_flags) &&
 		ctx->current_mode->exynos_mode.is_lp_mode) {
 		dev_warn(ctx->dev,
 			 "%s: skip LHBM/GHBM updates during lp mode, pending_update_flags(0x%x)\n",
 			 __func__, conn_state->pending_update_flags);
-		conn_state->pending_update_flags &= ~(HBM_FLAG_LHBM_UPDATE | HBM_FLAG_GHBM_UPDATE);
+		conn_state->pending_update_flags &= ~normal_feat_flags;
 	}
 
 	if (mipi_sync) {
 		dev_info(ctx->dev, "%s: mipi_sync(0x%lx) pending_update_flags(0x%x)\n", __func__,
 			 conn_state->mipi_sync, conn_state->pending_update_flags);
+		if (conn_state->mipi_sync & MIPI_CMD_SYNC_LHBM)
+			exynos_panel_lhbm_on_delay_frames(conn_state->base.crtc, ctx);
+
 		exynos_panel_check_mipi_sync_timing(conn_state->base.crtc,
 						    ctx->current_mode, ctx);
+
 		exynos_dsi_dcs_write_buffer_force_batch_begin(dsi);
 	}
 
@@ -2061,6 +2119,15 @@ static void exynos_panel_pre_commit_properties(
 		DPU_ATRACE_BEGIN("set_dimming");
 		exynos_panel_set_dimming(ctx, conn_state->dimming_on);
 		DPU_ATRACE_END("set_dimming");
+	}
+
+	if ((conn_state->pending_update_flags & HBM_FLAG_OP_RATE_UPDATE) && exynos_panel_func &&
+	    exynos_panel_func->set_op_hz) {
+		DPU_ATRACE_BEGIN("set_op_hz");
+		dev_info(ctx->dev, "%s: set op_hz to %d\n", __func__,
+			 conn_state->operation_rate);
+		exynos_panel_set_op_hz(ctx, conn_state->operation_rate);
+		DPU_ATRACE_END("set_op_hz");
 	}
 
 	if (mipi_sync)
@@ -2112,7 +2179,7 @@ static void exynos_panel_connector_atomic_commit(
 		return;
 
 	mutex_lock(&ctx->mode_lock);
-	if (exynos_panel_func->commit_done && !ctx->current_mode->exynos_mode.is_lp_mode)
+	if (exynos_panel_func->commit_done && ctx->current_mode)
 		exynos_panel_func->commit_done(ctx);
 	mutex_unlock(&ctx->mode_lock);
 
@@ -3176,7 +3243,7 @@ static ssize_t acl_mode_store(struct device *dev,
 	struct exynos_panel *ctx = mipi_dsi_get_drvdata(dsi);
 	const struct exynos_panel_funcs *funcs = ctx->desc->exynos_panel_func;
 	ssize_t ret;
-	bool acl_mode;
+	u32 acl_mode;
 
 	if (!funcs || !funcs->set_acl_mode)
 		return -ENOTSUPP;
@@ -3185,8 +3252,8 @@ static ssize_t acl_mode_store(struct device *dev,
 		return -EAGAIN;
 
 
-	ret = kstrtobool(buf, &acl_mode);
-	if (ret) {
+	ret = kstrtouint(buf, 0, &acl_mode);
+	if (ret || (acl_mode > ACL_ENHANCED)) {
 		dev_err(dev, "invalid acl mode\n");
 		return ret;
 	}
@@ -3321,6 +3388,8 @@ static int exynos_panel_attach_properties(struct exynos_panel *ctx)
 	drm_object_attach_property(obj, p->panel_idle_support, desc->is_panel_idle_supported);
 	drm_object_attach_property(obj, p->panel_orientation, ctx->orientation);
 	drm_object_attach_property(obj, p->vrr_switch_duration, desc->vrr_switch_duration);
+	drm_object_attach_property(obj, p->operation_rate, 0);
+	drm_object_attach_property(obj, p->refresh_on_lp, desc->refresh_on_lp);
 
 	if (desc->brt_capability) {
 		ret = exynos_panel_attach_brightness_capability(&ctx->exynos_connector,
@@ -3504,66 +3573,68 @@ static int exynos_panel_bridge_atomic_check(struct drm_bridge *bridge,
 {
 	struct exynos_panel *ctx = bridge_to_exynos_panel(bridge);
 	struct drm_atomic_state *state = new_crtc_state->state;
-	struct drm_display_mode *target_mode;
 	const struct drm_display_mode *current_mode = &ctx->current_mode->mode;
 	const struct exynos_panel_funcs *funcs = ctx->desc->exynos_panel_func;
-	int current_vrefresh = drm_mode_vrefresh(current_mode);
-	int target_vrefresh;
 	int ret;
 
 	if (unlikely(!new_crtc_state))
 		return 0;
 
-	target_mode = &new_crtc_state->adjusted_mode;
-	target_vrefresh = drm_mode_vrefresh(target_mode);
+	if (unlikely(!current_mode)) {
+		dev_warn(ctx->dev, "%s: failed to get current mode, skip mode check\n", __func__);
+	} else {
+		struct drm_display_mode *target_mode = &new_crtc_state->adjusted_mode;
+		int current_vrefresh = drm_mode_vrefresh(current_mode);
+		int target_vrefresh = drm_mode_vrefresh(target_mode);
 
-	if (current_mode->hdisplay != target_mode->hdisplay &&
-	    current_mode->vdisplay != target_mode->vdisplay) {
-		if (current_vrefresh != target_vrefresh) {
-			/*
-			 * While switching resolution and refresh rate (from high to low) in the
-			 * same commit, the frame transfer time will become longer due to BTS update.
-			 * In the case, frame done time may cross to the next vsync, which will
-			 * hit DDIC’s constraint and cause the noises. Keep the current BTS
-			 * (higher one) for a few frames to avoid the problem.
-			 */
-			if (current_vrefresh > target_vrefresh) {
-				target_mode->clock =
-					target_mode->htotal * target_mode->vtotal *
-					current_vrefresh / 1000;
-				if (target_mode->clock != new_crtc_state->mode.clock) {
-					new_crtc_state->mode_changed = true;
-					dev_dbg(ctx->dev, "%s: keep mode (%s) clock %dhz on rrs\n",
-						__func__, target_mode->name, current_vrefresh);
+		if (current_mode->hdisplay != target_mode->hdisplay &&
+		    current_mode->vdisplay != target_mode->vdisplay) {
+			if (current_vrefresh != target_vrefresh) {
+				/*
+				 * While switching resolution and refresh rate (from high to low) in
+				 * the same commit, the frame transfer time will become longer due to
+				 * BTS update. In the case, frame done time may cross to the next
+				 * vsync, which will hit DDIC’s constraint and cause the noises. Keep
+				 * the current BTS (higher one) for a few frames to avoid the problem.
+				 */
+				if (current_vrefresh > target_vrefresh) {
+					target_mode->clock =
+						target_mode->htotal * target_mode->vtotal *
+						current_vrefresh / 1000;
+					if (target_mode->clock != new_crtc_state->mode.clock) {
+						new_crtc_state->mode_changed = true;
+						dev_dbg(ctx->dev, "%s: keep mode (%s) clock %dhz on rrs\n",
+							__func__, target_mode->name, current_vrefresh);
+					}
 				}
+
+				ctx->mode_in_progress = MODE_RES_AND_RR_IN_PROGRESS;
+			} else {
+				ctx->mode_in_progress = MODE_RES_IN_PROGRESS;
+			}
+		} else {
+			if (ctx->mode_in_progress == MODE_RES_AND_RR_IN_PROGRESS &&
+			    new_crtc_state->adjusted_mode.clock != new_crtc_state->mode.clock) {
+				new_crtc_state->mode_changed = true;
+				new_crtc_state->adjusted_mode.clock = new_crtc_state->mode.clock;
+				dev_dbg(ctx->dev, "%s: restore mode (%s) clock after rrs\n",
+					__func__, new_crtc_state->mode.name);
 			}
 
-			ctx->mode_in_progress = MODE_RES_AND_RR_IN_PROGRESS;
-		} else {
-			ctx->mode_in_progress = MODE_RES_IN_PROGRESS;
-		}
-	} else {
-		if (ctx->mode_in_progress == MODE_RES_AND_RR_IN_PROGRESS &&
-		    new_crtc_state->adjusted_mode.clock != new_crtc_state->mode.clock) {
-			new_crtc_state->mode_changed = true;
-			new_crtc_state->adjusted_mode.clock = new_crtc_state->mode.clock;
-			dev_dbg(ctx->dev, "%s: restore mode (%s) clock after rrs\n",
-				__func__, new_crtc_state->mode.name);
+			if (current_vrefresh != target_vrefresh)
+				ctx->mode_in_progress = MODE_RR_IN_PROGRESS;
+			else
+				ctx->mode_in_progress = MODE_DONE;
 		}
 
-		if (current_vrefresh != target_vrefresh)
-			ctx->mode_in_progress = MODE_RR_IN_PROGRESS;
-		else
-			ctx->mode_in_progress = MODE_DONE;
+		if (current_mode->hdisplay != target_mode->hdisplay ||
+		    current_mode->vdisplay != target_mode->vdisplay ||
+		    current_vrefresh != target_vrefresh)
+			dev_dbg(ctx->dev, "%s: current %dx%d@%d, target %dx%d@%d, type %d\n", __func__,
+				current_mode->hdisplay, current_mode->vdisplay, current_vrefresh,
+				target_mode->hdisplay, target_mode->vdisplay, target_vrefresh,
+				ctx->mode_in_progress);
 	}
-
-	if (current_mode->hdisplay != target_mode->hdisplay ||
-	    current_mode->vdisplay != target_mode->vdisplay ||
-	    current_vrefresh != target_vrefresh)
-		dev_dbg(ctx->dev, "%s: current %dx%d@%d, target %dx%d@%d, type %d\n", __func__,
-			current_mode->hdisplay, current_mode->vdisplay, current_vrefresh,
-			target_mode->hdisplay, target_mode->vdisplay, target_vrefresh,
-			ctx->mode_in_progress);
 
 	if (funcs && funcs->atomic_check) {
 		ret = funcs->atomic_check(ctx, state);
@@ -4068,13 +4139,7 @@ static void exynos_panel_bridge_mode_set(struct drm_bridge *bridge,
 
 		if (is_lp_mode && funcs->set_lp_mode) {
 			if (is_active) {
-				if (!is_local_hbm_disabled(ctx) && funcs->set_local_hbm_mode) {
-					dev_warn(ctx->dev,
-						"LHBM is on when switching to LP mode(%s), turn off LHBM first\n",
-						pmode->mode.name);
-					ctx->hbm.local_hbm.requested_state = LOCAL_HBM_DISABLED;
-					panel_update_local_hbm_locked(ctx);
-				}
+				_exynos_panel_disable_normal_feat_locked(ctx);
 				funcs->set_lp_mode(ctx, pmode);
 				ctx->panel_state = PANEL_STATE_LP;
 				need_update_backlight = true;
@@ -4088,6 +4153,13 @@ static void exynos_panel_bridge_mode_set(struct drm_bridge *bridge,
 				need_update_backlight = true;
 				state_changed = true;
 				come_out_lp_mode = true;
+
+				if (ctx->desc->lhbm_on_delay_frames &&
+					(crtc && !drm_crtc_vblank_get(crtc))) {
+					ctx->hbm.local_hbm.last_lp_vblank_cnt =
+							drm_crtc_vblank_count(crtc);
+					drm_crtc_vblank_put(crtc);
+				}
 			}
 			ctx->current_binned_lp = NULL;
 		} else if (funcs->mode_set) {
