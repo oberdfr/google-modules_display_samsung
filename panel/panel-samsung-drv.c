@@ -41,7 +41,7 @@
 #define PANEL_SLSI_DDIC_ID_LEN	5
 #define PROJECT_CODE_MAX	5
 
-static const char ext_info_regs[] = { 0xDA, 0xDB, 0xDC };
+static const char ext_info_regs[] = { 0xDA, 0xDB, 0xDC, 0xA1 };
 #define EXT_INFO_SIZE ARRAY_SIZE(ext_info_regs)
 
 #define exynos_connector_to_panel(c)					\
