@@ -78,7 +78,8 @@ DEFINE_MUTEX(g_dsim_lock);
 
 #define PANEL_DRV_LEN 64
 #define RETRY_READ_FIFO_MAX 10
-#define PANEL_ID_LENGTH 3
+#define PANEL_ID_LENGTH 4
+#define LEGACY_PANEL_ID_LENGTH 3
 
 static char panel_name[PANEL_DRV_LEN];
 module_param_string(panel_name, panel_name, sizeof(panel_name), 0644);
@@ -1402,19 +1403,23 @@ static const char *dsim_get_panel_name(const struct dsim_device *dsim, const cha
 static u32 dsim_get_panel_id(const char *name)
 {
 	char *p = strchr(name, '.');
-	u8 panel_id[PANEL_ID_LENGTH];
+	u8 panel_id[PANEL_ID_LENGTH] = {0};
 
-	/* if period is found, expect 6 hex characters (ex. panel_name.000000),
+	/* if period is found, expect 6 or 8 hex characters (ex. panel_name.000000),
 	 * otherwise return an invalid panel ID */
 	if (!p)
 		return INVALID_PANEL_ID;
 
 	p++;
 
-	if (strlen(p) != (PANEL_ID_LENGTH * 2) || hex2bin(panel_id, p, PANEL_ID_LENGTH))
-		return INVALID_PANEL_ID;
+	if ((strlen(p) == (PANEL_ID_LENGTH * 2) &&
+		!hex2bin(panel_id, p, PANEL_ID_LENGTH)) ||
+		(strlen(p) == (LEGACY_PANEL_ID_LENGTH * 2) &&
+		!hex2bin(panel_id + 1, p, LEGACY_PANEL_ID_LENGTH))) {
+		return __builtin_bswap32(*(u32*)panel_id);
+	}
 
-	return (panel_id[0] << 16) | (panel_id[1] << 8) | panel_id[2];
+	return INVALID_PANEL_ID;
 }
 
 static int dsim_parse_panel_name(struct dsim_device *dsim)
