@@ -329,40 +329,72 @@ static bool has_writeback_job(struct drm_crtc_state *new_crtc_state)
 	return false;
 }
 
-static void update_dsi_config_params(struct decon_config *config,
-				     const struct drm_crtc_state *crtc_state, bool dsc_enabled,
-				     unsigned int dsc_count, const struct drm_dsc_config *cfg,
-				     unsigned int delay_reg_init_us, unsigned int mode_flags,
-				     bool sw_trigger, int te_from)
-
+static void
+update_dsi_config_from_exynos_connector(struct decon_config *config,
+					const struct exynos_drm_connector_state *exynos_conn_state)
 {
 	bool is_vid_mode;
+	const struct exynos_display_mode *exynos_mode = &exynos_conn_state->exynos_mode;
 
-	config->dsc.enabled = dsc_enabled;
-	if (dsc_enabled) {
-		config->dsc.dsc_count = dsc_count;
-		config->dsc.slice_count = cfg->slice_count;
-		config->dsc.slice_height = cfg->slice_height;
-		config->dsc.slice_width = DIV_ROUND_UP(config->image_width,
-						       config->dsc.slice_count);
-		config->dsc.cfg = cfg;
-		config->dsc.delay_reg_init_us = delay_reg_init_us;
+	config->dsc.enabled = exynos_mode->dsc.enabled;
+	if (config->dsc.enabled) {
+		config->dsc.dsc_count = exynos_mode->dsc.dsc_count;
+		config->dsc.slice_count = exynos_mode->dsc.slice_count;
+		config->dsc.slice_height = exynos_mode->dsc.slice_height;
+		config->dsc.slice_width =
+			DIV_ROUND_UP(config->image_width, config->dsc.slice_count);
+		config->dsc.cfg = exynos_mode->dsc.cfg;
+		config->dsc.delay_reg_init_us = exynos_mode->dsc.delay_reg_init_us;
 	}
 
-	is_vid_mode = (mode_flags & MIPI_DSI_MODE_VIDEO) != 0;
+	is_vid_mode = (exynos_mode->mode_flags & MIPI_DSI_MODE_VIDEO) != 0;
 
 	config->mode.op_mode = is_vid_mode ? DECON_VIDEO_MODE : DECON_COMMAND_MODE;
 
-	if (!is_vid_mode && !sw_trigger) {
-		if (te_from >= MAX_DECON_TE_FROM_DDI) {
-			pr_warn("TE from DDI is not valid (%d)\n", te_from);
+	if (!is_vid_mode && !exynos_mode->sw_trigger) {
+		if (exynos_conn_state->te_from >= MAX_DECON_TE_FROM_DDI) {
+			pr_warn("TE from DDI is not valid (%d)\n", exynos_conn_state->te_from);
 		} else {
 			config->mode.trig_mode = DECON_HW_TRIG;
-			config->te_from = te_from;
+			config->te_from = exynos_conn_state->te_from;
 			pr_debug("TE from DDI%d\n", config->te_from);
 		}
 	}
 }
+
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+static void update_dsi_config_from_gs_connector(struct decon_config *config,
+						const struct gs_drm_connector_state *gs_conn_state)
+{
+	bool is_vid_mode;
+	const struct gs_display_mode *gs_mode = &gs_conn_state->gs_mode;
+
+	config->dsc.enabled = gs_mode->dsc.enabled;
+	if (config->dsc.enabled) {
+		config->dsc.dsc_count = gs_mode->dsc.dsc_count;
+		config->dsc.slice_count = gs_mode->dsc.cfg->slice_count;
+		config->dsc.slice_height = gs_mode->dsc.cfg->slice_height;
+		config->dsc.slice_width = DIV_ROUND_UP(config->image_width,
+						       config->dsc.slice_count);
+		config->dsc.cfg = gs_mode->dsc.cfg;
+		config->dsc.delay_reg_init_us = gs_mode->dsc.delay_reg_init_us;
+	}
+
+	is_vid_mode = (gs_mode->mode_flags & MIPI_DSI_MODE_VIDEO) != 0;
+
+	config->mode.op_mode = is_vid_mode ? DECON_VIDEO_MODE : DECON_COMMAND_MODE;
+
+	if (!is_vid_mode && !gs_mode->sw_trigger) {
+		if (gs_conn_state->te_from >= MAX_DECON_TE_FROM_DDI) {
+			pr_warn("TE from DDI is not valid (%d)\n", gs_conn_state->te_from);
+		} else {
+			config->mode.trig_mode = DECON_HW_TRIG;
+			config->te_from = gs_conn_state->te_from;
+			pr_debug("TE from DDI%d\n", config->te_from);
+		}
+	}
+}
+#endif
 
 static void decon_update_dsi_config(struct decon_config *config,
 				    const struct drm_crtc_state *crtc_state,
@@ -370,27 +402,16 @@ static void decon_update_dsi_config(struct decon_config *config,
 {
 	if (is_exynos_drm_connector(conn_state->connector)) {
 		const struct exynos_drm_connector_state *exynos_conn_state;
-		const struct exynos_display_mode *exynos_mode;
 
 		exynos_conn_state = to_exynos_connector_state(conn_state);
-		exynos_mode = &exynos_conn_state->exynos_mode;
-		update_dsi_config_params(config, crtc_state, exynos_mode->dsc.enabled,
-					 exynos_mode->dsc.dsc_count, exynos_mode->dsc.cfg,
-					 exynos_mode->dsc.delay_reg_init_us,
-					 exynos_mode->mode_flags, exynos_mode->sw_trigger,
-					 exynos_conn_state->te_from);
+		update_dsi_config_from_exynos_connector(config, exynos_conn_state);
 	}
 #if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
 	else if (is_gs_drm_connector(conn_state->connector)) {
 		const struct gs_drm_connector_state *gs_conn_state;
-		const struct gs_display_mode *gs_mode;
 
 		gs_conn_state = to_gs_connector_state(conn_state);
-		gs_mode = &gs_conn_state->gs_mode;
-		update_dsi_config_params(config, crtc_state, gs_mode->dsc.enabled,
-					 gs_mode->dsc.dsc_count, gs_mode->dsc.cfg,
-					 gs_mode->dsc.delay_reg_init_us, gs_mode->mode_flags,
-					 gs_mode->sw_trigger, gs_conn_state->te_from);
+		update_dsi_config_from_gs_connector(config, gs_conn_state);
 	}
 #endif
 	else {
