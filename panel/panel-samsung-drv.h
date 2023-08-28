@@ -87,6 +87,9 @@
 #define IS_HBM_ON(mode)	((mode) >= HBM_ON_IRC_ON && (mode) < HBM_STATE_MAX)
 #define IS_HBM_ON_IRC_OFF(mode)	(((mode) == HBM_ON_IRC_OFF))
 
+#define DRM_MODE_TYPE_VRR DRM_MODE_TYPE_USERDEF
+#define DRM_MODE_FLAG_NS DRM_MODE_FLAG_CLKDIV2
+
 /**
  * enum exynos_panel_state - panel operating state
  * @PANEL_STATE_UNINITIALIZED: Panel has never been initialized, and panel OTP info such as
@@ -959,6 +962,11 @@ static inline bool is_local_hbm_post_enabling_supported(struct exynos_panel *ctx
 static inline bool is_local_hbm_disabled(struct exynos_panel *ctx)
 {
 	return (ctx->hbm.local_hbm.effective_state == LOCAL_HBM_DISABLED);
+}
+
+static inline bool is_vrr_mode(const struct exynos_panel_mode *pmode)
+{
+	return (pmode->mode.type & DRM_MODE_TYPE_VRR);
 }
 
 #define EXYNOS_DSI_CMD_REV(cmd, delay, rev) { sizeof(cmd), cmd, delay, (u32)rev }

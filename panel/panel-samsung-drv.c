@@ -4232,8 +4232,8 @@ static void exynos_panel_bridge_mode_set(struct drm_bridge *bridge,
 		ctx->panel_state = PANEL_STATE_HANDOFF_MODESET;
 	}
 
-	dev_dbg(ctx->dev, "changing display mode to %dx%d@%d\n",
-		pmode->mode.hdisplay, pmode->mode.vdisplay, drm_mode_vrefresh(&pmode->mode));
+	dev_dbg(ctx->dev, "changing display mode to %s, lp %d, vrr %d\n",
+		mode->name, pmode->exynos_mode.is_lp_mode, is_vrr_mode(pmode));
 
 	dsi->mode_flags = pmode->exynos_mode.mode_flags;
 	ctx->last_mode_set_ts = ktime_get();
