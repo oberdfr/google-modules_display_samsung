@@ -39,6 +39,10 @@
 #include "exynos_drm_hibernation.h"
 #include "exynos_drm_recovery.h"
 
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+#include "gs_drm/gs_drm_connector.h"
+#endif
+
 extern const struct dpp_restriction dpp_drv_data;
 
 static const struct drm_framebuffer_funcs exynos_drm_fb_funcs = {
@@ -648,6 +652,21 @@ static void exynos_atomic_commit_tail(struct drm_atomic_state *old_state)
 					to_exynos_connector_state(old_conn_state),
 					to_exynos_connector_state(new_conn_state));
 		}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+		else if (is_gs_drm_connector(connector)) {
+			struct gs_drm_connector *gs_connector = to_gs_connector(connector);
+			const struct gs_drm_connector_helper_funcs *funcs =
+				gs_connector->helper_private;
+			if (!funcs->atomic_pre_commit)
+				continue;
+
+			funcs->atomic_pre_commit(gs_connector,
+						 to_gs_connector_state(old_conn_state),
+						 to_gs_connector_state(new_conn_state));
+		}
+#endif
+		else
+			pr_warn("%s Unsupported connector type\n", __func__);
 	}
 	DPU_ATRACE_END("connector_pre_commit");
 
@@ -685,6 +704,18 @@ static void exynos_atomic_commit_tail(struct drm_atomic_state *old_state)
 					to_exynos_connector_state(old_conn_state),
 					to_exynos_connector_state(new_conn_state));
 		}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+		else if (is_gs_drm_connector(connector)) {
+			struct gs_drm_connector *gs_connector = to_gs_connector(connector);
+			const struct gs_drm_connector_helper_funcs *funcs =
+				gs_connector->helper_private;
+
+			funcs->atomic_commit(gs_connector, to_gs_connector_state(old_conn_state),
+					     to_gs_connector_state(new_conn_state));
+		}
+#endif
+		else
+			pr_warn("%s Unsupported connector type\n", __func__);
 	}
 	DPU_ATRACE_END("connector_commit");
 	DPU_ATRACE_BEGIN("wait_for_crtc_flip");
