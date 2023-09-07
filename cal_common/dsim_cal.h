@@ -89,6 +89,8 @@ struct dsim_clks {
 	u32 esc_clk;
 	u32 byte_clk;
 	u32 word_clk;
+	u32 pending_hs_clk;
+	bool hs_clk_changed;
 };
 
 struct dsim_regs {

@@ -64,6 +64,7 @@ struct dp_link {
 struct dp_host {
 	u32  link_rate;
 	u8   num_lanes;
+	u8   max_bpc;
 	u8   support_tps;
 	bool fast_training;
 	bool enhanced_frame;
@@ -134,7 +135,12 @@ enum dp_state_for_hdcp22 {
 	DP_CONNECT,
 };
 
-enum link_training_status { LINK_TRAINING_UNKNOWN, LINK_TRAINING_SUCCESS, LINK_TRAINING_FAILURE };
+enum link_training_status {
+	LINK_TRAINING_UNKNOWN,
+	LINK_TRAINING_SUCCESS,
+	LINK_TRAINING_FAILURE,
+	LINK_TRAINING_FAILURE_SINK,
+};
 
 /* DisplayPort Device */
 struct dp_device {
@@ -165,8 +171,6 @@ struct dp_device {
 	/* DRM Mode */
 	int cur_mode_vic; /* VIC number of cur_mode */
 	struct drm_display_mode cur_mode;
-	struct drm_display_mode pref_mode;
-	bool fail_safe;
 	int num_modes;
 	int num_sads;
 
