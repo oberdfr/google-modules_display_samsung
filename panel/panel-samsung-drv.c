@@ -3389,7 +3389,7 @@ static int exynos_panel_attach_properties(struct exynos_panel *ctx)
 	drm_object_attach_property(obj, p->is_partial, desc->is_partial);
 	drm_object_attach_property(obj, p->panel_idle_support, desc->is_panel_idle_supported);
 	drm_object_attach_property(obj, p->panel_orientation, ctx->orientation);
-	drm_object_attach_property(obj, p->vrr_switch_duration, desc->vrr_switch_duration);
+	drm_object_attach_property(obj, p->rr_switch_duration, desc->rr_switch_duration);
 	drm_object_attach_property(obj, p->operation_rate, 0);
 	drm_object_attach_property(obj, p->refresh_on_lp, desc->refresh_on_lp);
 

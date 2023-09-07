@@ -663,7 +663,7 @@ static bool nt37290_update_panel_feat(struct exynos_panel *ctx,
 					   (spanel->hw_osc2_clk_idx == 1) ? 0x21 : 0x20);
 		}
 
-		/* VRR gamma band (60~10Hz) */
+		/* RR gamma band (60~10Hz) */
 		if (ctx->panel_rev == PANEL_REV_EVT1_1)
 			EXYNOS_DCS_BUF_ADD(ctx, 0x26, 0x01);
 

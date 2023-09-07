@@ -1194,7 +1194,7 @@ static void dsim_set_display_mode(struct dsim_device *dsim, const struct drm_dis
 	dsim_set_clock_mode(dsim, mode);
 
 	if (dsim->state == DSIM_STATE_HSCLKEN)
-		dsim_reg_set_vrr_config(dsim->id, &dsim->config, &dsim->clk_param);
+		dsim_reg_set_rr_config(dsim->id, &dsim->config, &dsim->clk_param);
 
 	dsim_debug(dsim, "dsim mode %s dsc is %s [%d %d %d %d]\n",
 			dsim->config.mode == DSIM_VIDEO_MODE ? "video" : "cmd",

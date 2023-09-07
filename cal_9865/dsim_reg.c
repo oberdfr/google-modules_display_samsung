@@ -2203,8 +2203,8 @@ int dsim_reg_stop(u32 id, u32 lanes)
 	return err;
 }
 
-/* Update DSIM reg for vrr changed */
-void dsim_reg_set_vrr_config(u32 id, const struct dsim_reg_config *config,
+/* Update DSIM reg for rr changed */
+void dsim_reg_set_rr_config(u32 id, const struct dsim_reg_config *config,
 		struct dsim_clks *clks)
 {
 	int idx;
