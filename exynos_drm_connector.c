@@ -171,6 +171,7 @@ bool is_exynos_drm_connector(const struct drm_connector *connector)
 {
 	return connector->funcs == &exynos_drm_connector_funcs;
 }
+EXPORT_SYMBOL(is_exynos_drm_connector);
 
 int exynos_drm_connector_init(struct drm_device *dev,
 			      struct exynos_drm_connector *exynos_connector,
