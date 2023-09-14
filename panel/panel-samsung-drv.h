@@ -18,6 +18,7 @@
 #include <linux/delay.h>
 #include <linux/regulator/consumer.h>
 #include <linux/gpio/consumer.h>
+#include <linux/of_gpio.h>
 #include <linux/backlight.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_connector.h>
@@ -86,6 +87,9 @@
 
 #define IS_HBM_ON(mode)	((mode) >= HBM_ON_IRC_ON && (mode) < HBM_STATE_MAX)
 #define IS_HBM_ON_IRC_OFF(mode)	(((mode) == HBM_ON_IRC_OFF))
+
+/* Default panel ready timeout (ms) */
+#define PANEL_READY_TIMEOUT_MS (500)
 
 /**
  * enum exynos_panel_state - panel operating state
@@ -637,6 +641,8 @@ struct exynos_panel_desc {
 	const struct panel_reg_ctrl reg_ctrl_pre_disable[PANEL_REG_COUNT];
 	const struct panel_reg_ctrl reg_ctrl_disable[PANEL_REG_COUNT];
 	const u32 normal_mode_work_delay_ms;
+	/* Panel ready timeout */
+	unsigned int rdy_timeout_ms;
 };
 
 #define PANEL_ID_MAX		40
@@ -686,6 +692,13 @@ struct te2_data {
 	enum exynos_panel_te2_opt option;
 };
 
+struct ready_signal_t {
+	int gpio;
+	int irq;
+	enum of_gpio_flags gpio_flags;
+	struct completion detected;
+};
+
 struct exynos_panel {
 	struct device *dev;
 	struct drm_panel panel;
@@ -704,6 +717,9 @@ struct exynos_panel {
 	struct drm_bridge bridge;
 	const struct exynos_panel_desc *desc;
 	const struct exynos_panel_mode *current_mode;
+
+	/* Detect panel ready */
+	struct ready_signal_t ready_signal;
 
 	/* Deprected: please refer to panel_state instead */
 	bool enabled;
@@ -1106,7 +1122,7 @@ int exynos_panel_read_ddic_id(struct exynos_panel *ctx);
 void exynos_panel_get_panel_rev(struct exynos_panel *ctx, u8 rev);
 void exynos_panel_model_init(struct exynos_panel *ctx, const char* project, u8 extra_info);
 int exynos_panel_init(struct exynos_panel *ctx);
-void exynos_panel_reset(struct exynos_panel *ctx);
+int exynos_panel_reset(struct exynos_panel *ctx);
 int exynos_panel_set_power(struct exynos_panel *ctx, bool on);
 int exynos_panel_init_brightness(struct exynos_panel_desc *desc,
 				const struct exynos_brightness_configuration *configs,

@@ -232,6 +232,10 @@ static int exynos_panel_parse_gpios(struct exynos_panel *ctx)
 	ctx->vddd_gpio = devm_gpiod_get(dev, "vddd", GPIOD_OUT_HIGH);
 	if (IS_ERR(ctx->vddd_gpio))
 		ctx->vddd_gpio = NULL;
+
+	ctx->ready_signal.gpio = of_get_named_gpio_flags(dev->of_node, "rdy-gpios", 0,
+							 &ctx->ready_signal.gpio_flags);
+
 	dev_dbg(ctx->dev, "%s -\n", __func__);
 	return 0;
 }
@@ -474,15 +478,59 @@ int exynos_panel_init(struct exynos_panel *ctx)
 }
 EXPORT_SYMBOL(exynos_panel_init);
 
-void exynos_panel_reset(struct exynos_panel *ctx)
+static int exynos_panel_wait_ready(struct exynos_panel *ctx)
 {
+	ktime_t start_time, end_time;
+	int rdy_active_val;
+	unsigned int timeout_ms;
+	bool panel_ready_detected = false;
+
+	/* For the project doesn't have the ready pin signal, return immediately. */
+	if (ctx->ready_signal.irq < 0)
+		return 0;
+
+	DPU_ATRACE_BEGIN(__func__);
+
+	start_time = ktime_get();
+	reinit_completion(&ctx->ready_signal.detected);
+	enable_irq(ctx->ready_signal.irq);
+
+	/* expected ready pin active value */
+	rdy_active_val = (ctx->ready_signal.gpio_flags & OF_GPIO_ACTIVE_LOW) == 0;
+	timeout_ms = (ctx->desc && ctx->desc->rdy_timeout_ms) ? ctx->desc->rdy_timeout_ms :
+								PANEL_READY_TIMEOUT_MS;
+
+	/* Check if the ready pin is already ready. If not just wait for the interrupt. */
+	if (gpio_get_value(ctx->ready_signal.gpio) == rdy_active_val ||
+	    wait_for_completion_timeout(&ctx->ready_signal.detected, msecs_to_jiffies(timeout_ms)) >
+		    0)
+		panel_ready_detected = true;
+
+	disable_irq(ctx->ready_signal.irq);
+	end_time = ktime_get();
+
+	if (panel_ready_detected) {
+		dev_dbg(ctx->dev, "panel ready detected: %lldms\n",
+			ktime_sub_ns(end_time, start_time) / 1000);
+	} else {
+		dev_err(ctx->dev, "wait panel ready timeout: %ums\n", timeout_ms);
+	}
+
+	DPU_ATRACE_END(__func__);
+
+	return panel_ready_detected ? 0 : -ETIMEDOUT;
+}
+
+int exynos_panel_reset(struct exynos_panel *ctx)
+{
+	int ret;
 	u32 delay;
 	const u32 *timing_ms = ctx->desc->reset_timing_ms;
 
 	dev_dbg(ctx->dev, "%s +\n", __func__);
 
 	if (IS_ENABLED(CONFIG_BOARD_EMULATOR) || IS_ERR_OR_NULL(ctx->reset_gpio))
-		return;
+		return 0;
 
 	gpiod_set_value(ctx->reset_gpio, 1);
 	delay = timing_ms[PANEL_RESET_TIMING_HIGH] ?: 5;
@@ -501,10 +549,16 @@ void exynos_panel_reset(struct exynos_panel *ctx)
 
 	dev_dbg(ctx->dev, "%s -\n", __func__);
 
+	ret = exynos_panel_wait_ready(ctx);
+	if (ret)
+		return ret;
+
 	ctx->is_brightness_initialized = false;
 	exynos_panel_init(ctx);
 
 	exynos_panel_post_power_on(ctx);
+
+	return 0;
 }
 EXPORT_SYMBOL(exynos_panel_reset);
 
@@ -740,6 +794,59 @@ static int exynos_panel_parse_dt(struct exynos_panel *ctx)
 	ctx->orientation = orientation;
 
 err:
+	return ret;
+}
+
+static irqreturn_t panel_rdy_irq_handler(int irq, void *dev_data)
+{
+	struct exynos_panel *ctx = dev_data;
+
+	if (!ctx)
+		return IRQ_HANDLED;
+
+	complete_all(&ctx->ready_signal.detected);
+
+	return IRQ_HANDLED;
+}
+
+static int exynos_panel_register_irqs(struct exynos_panel *ctx)
+{
+	struct platform_device *pdev;
+	int ret = 0, irq;
+
+	pdev = container_of(ctx->dev, struct platform_device, dev);
+
+	/* 1: Panel ready */
+	init_completion(&ctx->ready_signal.detected);
+	if (gpio_is_valid(ctx->ready_signal.gpio)) {
+		ret = gpio_to_irq(ctx->ready_signal.gpio);
+		if (ret < 0) {
+			dev_err(ctx->dev, "Failed to get irq number for rdy_gpio: %d\n", ret);
+			return ret;
+		}
+
+		irq = ret;
+		irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY);
+		ret = devm_request_irq(ctx->dev, irq, panel_rdy_irq_handler,
+				       (ctx->ready_signal.gpio_flags & OF_GPIO_ACTIVE_LOW ?
+						IRQF_TRIGGER_FALLING :
+						IRQF_TRIGGER_RISING),
+				       pdev->name, ctx);
+		if (ret) {
+			dev_err(ctx->dev, "Request rdy irq number(%d) failed: %d\n", irq, ret);
+			return ret;
+		}
+		disable_irq(irq);
+
+		ctx->ready_signal.irq = irq;
+		dev_info(ctx->dev, "Request rdy irq number(%d) okay (%sING_TRIGGER)\n", irq,
+			 (ctx->ready_signal.gpio_flags & OF_GPIO_ACTIVE_LOW ? "FALL" : "RIS"));
+	} else {
+		/* Panel doesn't have the ready pin */
+		ctx->ready_signal.irq = -ENOENT;
+		dev_dbg(ctx->dev, "No rdy-gpios specified for panel, skip irq registration\n");
+	}
+
 	return ret;
 }
 
@@ -4618,6 +4725,10 @@ int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 	dsi->format = MIPI_DSI_FMT_RGB888;
 
 	ret = exynos_panel_parse_dt(ctx);
+	if (ret)
+		return ret;
+
+	ret = exynos_panel_register_irqs(ctx);
 	if (ret)
 		return ret;
 
