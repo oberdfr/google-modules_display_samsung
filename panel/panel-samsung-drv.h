@@ -300,6 +300,20 @@ struct exynos_panel_funcs {
 	int (*set_power)(struct exynos_panel *exynos_panel, bool enable);
 
 	/**
+	 * @post_power_on:
+	 *
+	 * This callback is used to implement panel specific post_power_on sequence.
+	 */
+	int (*post_power_on)(struct exynos_panel *exynos_panel);
+
+	/**
+	 * @pre_power_off:
+	 *
+	 * This callback is used to implement panel specific pre_power_off sequence.
+	 */
+	int (*pre_power_off)(struct exynos_panel *ctx);
+
+	/**
 	 * @is_mode_seamless:
 	 *
 	 * This callback is used to check if a switch to a particular mode can be done

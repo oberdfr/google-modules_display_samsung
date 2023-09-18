@@ -629,15 +629,19 @@ EXPORT_SYMBOL(exynos_panel_set_power);
 
 static void exynos_panel_post_power_on(struct exynos_panel *ctx)
 {
+	const struct exynos_panel_funcs *funcs = ctx->desc->exynos_panel_func;
 	int ret;
 
 	if (IS_ENABLED(CONFIG_BOARD_EMULATOR))
 		return;
 
-	if (!IS_VALID_PANEL_REG_ID(ctx->desc->reg_ctrl_post_enable[0].id))
+	if (funcs && funcs->post_power_on)
+		ret = funcs->post_power_on(ctx);
+	else if (!IS_VALID_PANEL_REG_ID(ctx->desc->reg_ctrl_post_enable[0].id))
 		return;
+	else
+		ret = _exynos_panel_reg_ctrl(ctx, ctx->desc->reg_ctrl_post_enable, true);
 
-	ret = _exynos_panel_reg_ctrl(ctx, ctx->desc->reg_ctrl_post_enable, true);
 	if (ret)
 		dev_err(ctx->dev, "failed to set post power on: ret %d\n", ret);
 	else
@@ -646,15 +650,19 @@ static void exynos_panel_post_power_on(struct exynos_panel *ctx)
 
 static void exynos_panel_pre_power_off(struct exynos_panel *ctx)
 {
+	const struct exynos_panel_funcs *funcs = ctx->desc->exynos_panel_func;
 	int ret;
 
 	if (IS_ENABLED(CONFIG_BOARD_EMULATOR))
 		return;
 
-	if (!IS_VALID_PANEL_REG_ID(ctx->desc->reg_ctrl_pre_disable[0].id))
+	if (funcs && funcs->pre_power_off)
+		ret = funcs->pre_power_off(ctx);
+	else if (!IS_VALID_PANEL_REG_ID(ctx->desc->reg_ctrl_pre_disable[0].id))
 		return;
+	else
+		ret = _exynos_panel_reg_ctrl(ctx, ctx->desc->reg_ctrl_pre_disable, false);
 
-	ret = _exynos_panel_reg_ctrl(ctx, ctx->desc->reg_ctrl_pre_disable, false);
 	if (ret)
 		dev_err(ctx->dev, "failed to set pre power off: ret %d\n", ret);
 	else
