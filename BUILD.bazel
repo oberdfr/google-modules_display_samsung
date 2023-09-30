@@ -19,6 +19,18 @@ filegroup(
     ],
 )
 
+filegroup(
+    name = "display.samsung.kconfig",
+    srcs = glob([
+        "Kconfig",
+        "panel/Kconfig",
+    ]),
+    visibility = [
+        "//private/devices/google:__subpackages__",
+        "//private/google-modules/soc/gs:__pkg__",
+    ],
+)
+
 kernel_module(
     name = "display.samsung",
     srcs = glob([
