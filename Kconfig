@@ -1,7 +1,11 @@
+# SPDX-License-Identifier: MIT
+
 config DRM_SAMSUNG
 	tristate "DRM Support for Samsung EXYNOS Series"
-	depends on OF && DRM && (SOC_EXYNOS9820 || SOC_GS101 || SOC_GS201) && ION
+	depends on OF && DRM && (SOC_EXYNOS9820 || SOC_GS101 || SOC_GS201 || SOC_ZUMA)
 	select DRM_KMS_HELPER
+	select DRM_DISPLAY_DP_HELPER
+	select DRM_DISPLAY_HELPER
 	select VIDEOMODE_HELPERS
 	help
 	  Choose this option if you have a Samsung EXYNOS SoC chipset.
@@ -69,5 +73,13 @@ config DRM_SAMSUNG_DP_AUDIO
 	depends on DRM_SAMSUNG_DP
 	help
 	  This enables Audio support for Exynos DisplayPort device.
+
+config DRM_SAMSUNG_TUI
+	bool "TUI reverse proxy on Exynos"
+	depends on DRM_SAMSUNG
+	default DRM_SAMSUNG
+	help
+	  This enables the TUI reverse proxy which allows the TA to allocate
+	  framebuffer.
 
 endif

@@ -91,6 +91,9 @@
 /* Default panel ready timeout (ms) */
 #define PANEL_READY_TIMEOUT_MS (500)
 
+#define DRM_MODE_TYPE_VRR DRM_MODE_TYPE_USERDEF
+#define DRM_MODE_FLAG_NS DRM_MODE_FLAG_CLKDIV2
+
 /**
  * enum exynos_panel_state - panel operating state
  * @PANEL_STATE_UNINITIALIZED: Panel has never been initialized, and panel OTP info such as
@@ -505,6 +508,14 @@ struct exynos_panel_funcs {
 				    const struct exynos_panel_mode *pmode);
 
 	/**
+	 * @rr_need_te_high
+	 *
+	 * check if a panel needs send rr cmds at TE high window.
+	 */
+	bool (*rr_need_te_high)(struct exynos_panel *exynos_panel,
+				    const struct exynos_panel_mode *pmode);
+
+	/**
 	 * @run_normal_mode_work
 	 *
 	 * This callback is used to run the periodic work for each panel in
@@ -518,6 +529,20 @@ struct exynos_panel_funcs {
 	 * Parse regulators for panel.
 	 */
 	int (*parse_regulators)(struct exynos_panel *ctx);
+
+	/**
+	 * @update_ffc
+	 *
+	 * This callback is used to update FFC (Frame Frequency Control) for panel.
+	 */
+	void (*update_ffc)(struct exynos_panel *exynos_panel, unsigned int hs_clk);
+
+	/**
+	 * @pre_update_ffc
+	 *
+	 * This callback is used to do something before updating FFC for panel.
+	 */
+	void (*pre_update_ffc)(struct exynos_panel *exynos_panel);
 };
 
 /**
@@ -643,6 +668,7 @@ struct exynos_panel_desc {
 	const u32 normal_mode_work_delay_ms;
 	/* Panel ready timeout */
 	unsigned int rdy_timeout_ms;
+	const u32 default_dsi_hs_clk;
 };
 
 #define PANEL_ID_MAX		40
@@ -847,6 +873,8 @@ struct exynos_panel {
 	enum mode_progress_type mode_in_progress;
 	/* indicates BTS raise due to op_hz switch */
 	bool boosted_for_op_hz;
+	/* current MIPI DSI HS clock (frequency) */
+	u32 dsi_hs_clk;
 };
 
 /**
@@ -972,6 +1000,11 @@ static inline bool is_local_hbm_post_enabling_supported(struct exynos_panel *ctx
 static inline bool is_local_hbm_disabled(struct exynos_panel *ctx)
 {
 	return (ctx->hbm.local_hbm.effective_state == LOCAL_HBM_DISABLED);
+}
+
+static inline bool is_vrr_mode(const struct exynos_panel_mode *pmode)
+{
+	return (pmode->mode.type & DRM_MODE_TYPE_VRR);
 }
 
 #define EXYNOS_DSI_CMD_REV(cmd, delay, rev) { sizeof(cmd), cmd, delay, (u32)rev }
