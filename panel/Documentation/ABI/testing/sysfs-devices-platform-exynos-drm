@@ -26,3 +26,13 @@ Description:
 		The file provides the Vreg power setting of a panel.
 
 		Valid panels are 'primary-panel' or 'secondary-panel'.
+
+What:		/sys/devices/platform/exynos-drm/<panel>/refresh_ctrl
+Date:		October, 2024
+KernelVersion:	6.1
+Contact:	"Jeremy DeHaan" <jdehaan@google.com>
+Description:
+		This file provides a mechanism to control panel refresh
+		behaviors.
+
+		Valid panels are 'primary-panel' or 'secondary-panel'.

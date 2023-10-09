@@ -83,6 +83,10 @@
 #define IS_HBM_ON(mode)	((mode) >= HBM_ON_IRC_ON && (mode) < HBM_STATE_MAX)
 #define IS_HBM_ON_IRC_OFF(mode)	(((mode) == HBM_ON_IRC_OFF))
 
+#define PANEL_REFRESH_CTRL_FI BIT(0)
+#define PANEL_REFRESH_CTRL_IDLE BIT(1)
+#define PANEL_REFRESH_CTRL_MASK (PANEL_REFRESH_CTRL_FI | PANEL_REFRESH_CTRL_IDLE)
+
 /**
  * enum exynos_panel_state - panel operating state
  * @PANEL_STATE_UNINITIALIZED: Panel has never been initialized, and panel OTP info such as
@@ -459,6 +463,13 @@ struct exynos_panel_funcs {
 	 * otherwise returns false if no action was taken.
 	 */
 	bool (*set_self_refresh)(struct exynos_panel *exynos_panel, bool enable);
+
+	/**
+	 * @refresh_ctrl
+	 *
+	 * Control some panel refresh behaviors for panels.
+	 */
+	void (*refresh_ctrl)(struct exynos_panel *exynos_panel, u32 ctrl);
 
 	/**
 	 * @set_op_hz

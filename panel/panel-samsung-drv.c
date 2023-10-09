@@ -1765,6 +1765,40 @@ static ssize_t refresh_rate_show(struct device *dev, struct device_attribute *at
 	return scnprintf(buf, PAGE_SIZE, "%d\n", rr);
 }
 
+static ssize_t refresh_ctrl_store(struct device *dev,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
+	struct exynos_panel *ctx = mipi_dsi_get_drvdata(dsi);
+	const struct exynos_panel_funcs *funcs = ctx->desc->exynos_panel_func;
+	ssize_t ret;
+	u32 ctrl;
+
+	if (!count)
+		return -EINVAL;
+
+	if (!is_panel_initialized(ctx))
+		return -EAGAIN;
+
+	if (!is_panel_active(ctx))
+		return -EPERM;
+
+	if (!funcs || !funcs->refresh_ctrl)
+		return -EINVAL;
+
+	ret = kstrtou32(buf, 0, &ctrl);
+	if (ret || !(ctrl & PANEL_REFRESH_CTRL_MASK)) {
+		return -EINVAL;
+	}
+
+	mutex_lock(&ctx->mode_lock);
+	funcs->refresh_ctrl(ctx, ctrl);
+	mutex_unlock(&ctx->mode_lock);
+
+	return count;
+}
+
 static ssize_t error_count_te_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
 	const struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
@@ -1823,6 +1857,7 @@ static DEVICE_ATTR_RW(osc2_clk_khz);
 static DEVICE_ATTR_RO(available_osc2_clk_khz);
 static DEVICE_ATTR_RW(op_hz);
 static DEVICE_ATTR_RO(refresh_rate);
+static DEVICE_ATTR_WO(refresh_ctrl);
 static DEVICE_ATTR_RO(error_count_te);
 static DEVICE_ATTR_RO(error_count_unknown);
 static DEVICE_ATTR_RO(panel_pwr_vreg);
@@ -1844,6 +1879,7 @@ static const struct attribute *panel_attrs[] = {
 	&dev_attr_available_osc2_clk_khz.attr,
 	&dev_attr_op_hz.attr,
 	&dev_attr_refresh_rate.attr,
+	&dev_attr_refresh_ctrl.attr,
 	&dev_attr_error_count_te.attr,
 	&dev_attr_error_count_unknown.attr,
 	&dev_attr_panel_pwr_vreg.attr,
