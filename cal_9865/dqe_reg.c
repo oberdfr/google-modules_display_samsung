@@ -780,11 +780,13 @@ void dqe_reg_set_histogram(u32 dqe_id, enum exynos_histogram_id hist_id, enum hi
 	switch (state) {
 	case HISTOGRAM_BLOCKED_FULL:
 		val = HIST_ROI_BLOCKING_EN;
+		fallthrough;
 	case HISTOGRAM_FULL:
 		val |= HIST_EN;
 		break;
 	case HISTOGRAM_BLOCKED_ROI:
 		val = HIST_ROI_BLOCKING_EN;
+		fallthrough;
 	case HISTOGRAM_ROI:
 		val |= HIST_EN | HIST_ROI_ON;
 		break;
