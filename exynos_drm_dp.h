@@ -164,6 +164,7 @@ struct dp_device {
 	/* HPD State */
 	enum hotplug_state hpd_current_state;
 	struct mutex hpd_state_lock;
+	int dp_hotplug_error_code;
 
 	/* DP Driver State */
 	enum dp_state state;
@@ -179,8 +180,12 @@ struct dp_device {
 	struct dp_host host;
 	struct dp_sink sink;
 
+	/* DP Branch Device support */
+	int sink_count;
+	int dfp_count;
+
 	/* BIST */
-	bool bist_used;
+	int bist_mode;
 
 	/* Audio */
 	enum dp_audio_state audio_state;
@@ -194,6 +199,11 @@ struct dp_device {
 	enum plug_orientation typec_orientation;
 	enum pin_assignment typec_pin_assignment;
 	enum link_training_status typec_link_training_status;
+
+	/* DP Link CRCs enabled */
+	bool dp_link_crc_enabled;
+	struct dentry *dp_crc_enabled_debugfs_file;
+	struct dentry *dp_crc_values_debugfs_file;
 };
 
 static inline struct dp_device *get_dp_drvdata(void)

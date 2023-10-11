@@ -456,6 +456,7 @@ struct decon_device {
 	struct device			*dev;
 	struct drm_device		*drm_dev;
 	struct exynos_drm_crtc		*crtc;
+	struct drm_atomic_state		*suspend_state;
 	/* dpp information saved in dpp channel number order */
 	struct dpp_device		*dpp[MAX_WIN_PER_DECON];
 	struct dpp_device		*rcd;
@@ -485,8 +486,6 @@ struct decon_device {
 	int				te_gpio;
 	atomic_t			te_ref;
 	struct completion te_rising; /* signaled when irq_te is triggered */
-	/* whether the first TE after booting is triggered */
-	bool is_first_te_triggered;
 
 	spinlock_t			slock;
 
