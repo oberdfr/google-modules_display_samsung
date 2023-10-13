@@ -14,6 +14,8 @@
 #include <cal_config.h>
 #include <dp_cal.h>
 
+#include <linux/soc/samsung/exynos-smc.h>
+
 #include "regs-dp.h"
 #include "regs-usbdpphy_ctrl.h"
 #include "regs-usbdpphy_tca_ctrl.h"
@@ -2367,7 +2369,13 @@ void dp_hw_init(struct dp_hw_config *hw_config)
 
 	/* Set System Common Functions Enable */
 	dp_hw_set_initial_common_funcs();
+	dp_reg_set_pcs_func_en(1);
 	cal_log_debug(0, "set common function\n");
+
+	/* Set Single-Stream Transport Functions Enable */
+	dp_reg_set_enhanced_mode(hw_config->enhanced_mode ? 1 : 0);
+	dp_reg_set_sst1_video_func_en(1);
+	cal_log_debug(0, "set sst function\n");
 
 	/* Set System SW Functions Enable */
 	dp_reg_set_sw_func_en(1);
@@ -2445,9 +2453,9 @@ void dp_hw_start(void)
 
 void dp_hw_stop(void)
 {
-	dp_reg_set_sst1_longhop_power(0);
-	dp_hw_set_video_interrupt(0);
 	dp_reg_set_video_en(0);
+	dp_hw_set_video_interrupt(0);
+	dp_reg_set_sst1_longhop_power(0);
 }
 
 void dp_hw_set_video_config(struct dp_hw_config *hw_config)
@@ -2815,4 +2823,122 @@ void dp_hw_set_hdcp22_function(u32 en)
 void dp_hw_set_hdcp22_encryption(u32 en)
 {
 	dp_reg_set_hdcp22_encryption_enable(en);
+}
+
+static int dp_smc_read(u32 dp_id, u32 offset, u32 *read_result)
+{
+	struct cal_regs_desc *rdesc = dp_regs_desc(dp_id);
+	unsigned long smc_result = 0;
+	unsigned long smc_read_result = 0;
+
+	if (read_result == NULL)
+		return -EINVAL;
+	smc_result = exynos_smc4(SMC_DRM_DPU_CRC_SEC, rdesc->start + offset, 0, 0, &smc_read_result,
+				 0, 0);
+	if (smc_result != DRMDRV_OK) {
+		pr_debug("%s: exynos_smc_readvalue failed (smc_result=%lu)\n", __func__,
+			 smc_result);
+		return -EIO;
+	}
+	*read_result = (u32)smc_read_result;
+	return 0;
+}
+
+static int dp_smc_read_mask(u32 dp_id, u32 offset, u32 mask, u32 *read_result)
+{
+	int res = dp_smc_read(dp_id, offset, read_result);
+
+	if (res != 0)
+		return res;
+	*read_result &= mask;
+	return 0;
+}
+
+static int dp_smc_write(u32 dp_id, u32 offset, u32 val)
+{
+	struct cal_regs_desc *rdesc = dp_regs_desc(dp_id);
+	unsigned long smc_result = 0;
+
+	smc_result = exynos_smc(SMC_DRM_DPU_CRC_SEC, rdesc->start + offset, 1, val);
+	if (smc_result != DRMDRV_OK) {
+		pr_debug("%s: exynos_smc failed (smc_result=%lu)\n", __func__, smc_result);
+		return -EIO;
+	}
+	return 0;
+}
+
+static int dp_smc_write_mask(u32 dp_id, u32 offset, u32 val, u32 mask)
+{
+	u32 read_result = 0;
+	int smc_res = dp_smc_read(dp_id, offset, &read_result);
+
+	if (smc_res != 0)
+		return smc_res;
+
+	val = (val & mask) | (read_result & ~mask);
+	return dp_smc_write(dp_id, offset, val);
+}
+
+int dp_crc_set_enabled(u32 id, u32 en)
+{
+	int res = 0;
+	u32 wval = 0;
+
+	wval = en ? (IF_CRC_SW_COMPARE | IF_CRC_EN) : 0;
+	res = dp_smc_write_mask(id, SST1_STREAM_IF_CRC_CONTROL_1, wval,
+				IF_CRC_SW_COMPARE | IF_CRC_EN);
+	if (res != 0) {
+		pr_debug("%s: dp_smc_write_mask failed: %d\n", __func__, res);
+		return res;
+	}
+	wval = en ? SEC_CRC_ENABLE : 0;
+	res = dp_smc_write_mask(id, SST1_SEC_CRC_CONTROL_4, wval, SEC_CRC_ENABLE);
+	if (res != 0) {
+		pr_debug("%s: dp_smc_write_mask failed: %d\n", __func__, res);
+		return res;
+	}
+	return res;
+}
+
+int dp_crc_get(u32 id, u32 crc_data[3])
+{
+	int res = 0;
+
+	res = dp_smc_read_mask(id, SST1_SEC_CRC_CONTROL_1, SEC_CRC_RGB_RESULT, &crc_data[0]);
+	if (res != 0) {
+		pr_debug("%s: dp_smc_read_mask failed: %d\n", __func__, res);
+		return res;
+	}
+	res = dp_smc_read_mask(id, SST1_SEC_CRC_CONTROL_2, SEC_CRC_RGB_RESULT, &crc_data[1]);
+	if (res != 0) {
+		pr_debug("%s: dp_smc_read_mask failed: %d\n", __func__, res);
+		return res;
+	}
+	res = dp_smc_read_mask(id, SST1_SEC_CRC_CONTROL_3, SEC_CRC_RGB_RESULT, &crc_data[2]);
+	if (res != 0) {
+		pr_debug("%s: dp_smc_read_mask failed: %d\n", __func__, res);
+		return res;
+	}
+
+	return res;
+}
+
+int dp_crc_reset(u32 id)
+{
+	int res = 0;
+	u32 wval = 0;
+
+	wval = IF_CRC_CLEAR;
+	res = dp_smc_write_mask(id, SST1_STREAM_IF_CRC_CONTROL_1, wval, wval);
+	if (res != 0) {
+		pr_debug("%s: dp_smc_write_mask failed: %d\n", __func__, res);
+		return res;
+	}
+	wval = CLEAR_SEC_CRC_LFSR | SEC_CRC_CLEAR;
+	res = dp_smc_write_mask(id, SST1_SEC_CRC_CONTROL_4, wval, wval);
+	if (res != 0) {
+		pr_debug("%s: dp_smc_write_mask failed: %d\n", __func__, res);
+		return res;
+	}
+	return res;
 }

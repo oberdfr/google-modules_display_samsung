@@ -14,6 +14,8 @@
  */
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
+#include <drm/drm_atomic_uapi.h>
+#include <drm/drm_modeset_lock.h>
 #include <drm/drm_bridge.h>
 #include <drm/drm_vblank.h>
 #include <drm/exynos_drm.h>
@@ -88,8 +90,6 @@ static bool decon_check_fs_pending_locked(struct decon_device *decon);
 #else
 #define FRAME_TIMEOUT msecs_to_jiffies(100)
 #endif
-
-#define FIRST_TE_TIMEOUT msecs_to_jiffies(500)
 
 /* wait at least one frame time on top of common timeout */
 static inline unsigned long fps_timeout(int fps)
@@ -1351,27 +1351,19 @@ static void decon_exit_hibernation(struct decon_device *decon)
 
 static void decon_wait_for_te(struct decon_device *decon, int vrefresh)
 {
-	unsigned int timeout_ms =
-			vrefresh ? DIV_ROUND_UP(MSEC_PER_SEC, vrefresh) : FIRST_TE_TIMEOUT;
+	unsigned int te_period_ms = DIV_ROUND_UP(MSEC_PER_SEC, vrefresh);
 
 	reinit_completion(&decon->te_rising);
-	decon_enable_te_irq(decon, true);
-	decon_info(decon, "%s: eneble te irq for timing control\n", __func__);
 
-	/*
-	 * Wait for next TE rising. For the case of 1st TE after booting, the
-	 * vrefresh may hasn't been determined, set a longer timeout since the
-	 * 1st frame may come late.
-	 */
 	DPU_ATRACE_BEGIN(__func__);
-	if (!wait_for_completion_timeout(&decon->te_rising, timeout_ms))
-		decon_warn(decon, "%s: wait for TE timeout (%dms)\n", __func__, timeout_ms);
-	DPU_ATRACE_END(__func__);
 
-	decon_enable_te_irq(decon, false);
+	/* Wait for next TE rising or one TE period */
+	if (!wait_for_completion_timeout(&decon->te_rising, te_period_ms))
+		decon_debug(decon, "%s: exceed 1 TE period for %dhz\n", __func__, vrefresh);
+
+	DPU_ATRACE_END(__func__);
 }
 
-#define BOOT_DSC_REG_INIT_DELAY_US 10000
 static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_state *old_crtc_state)
 {
 	const struct drm_crtc_state *crtc_state = exynos_crtc->base.state;
@@ -1379,7 +1371,6 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 	struct decon_device *decon = exynos_crtc->ctx;
 	int vrefresh = drm_mode_vrefresh(&old_crtc_state->mode);
 	unsigned long flags;
-	bool decon_init = decon->state == DECON_STATE_INIT;
 
 	if (decon->state == DECON_STATE_ON) {
 		decon_info(decon, "already enabled(%d)\n", decon->state);
@@ -1432,12 +1423,8 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 			}
 		}
 
-		if (decon_is_te_enabled(decon)) {
+		if (decon_is_te_enabled(decon))
 			decon_request_te_irq(exynos_crtc, conn_state);
-
-			if (decon_init)
-				decon->is_first_te_triggered = false;
-		}
 	}
 
 	pm_runtime_get_sync(decon->dev);
@@ -1461,44 +1448,33 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 	decon_info(decon, "%s -\n", __func__);
 
 ret:
-	if (decon->config.dsc.enabled) {
-		if (decon_init) {
-			/*
-			 * The 1st TE period will be 16.6ms while booting because we only
-			 * use 60Hz in the bootloader. Delay an estimated time after
-			 * receiving the 1st TE then configure the DPU DSC so that the
-			 * panel DSC and the 1st framestart can be within the same VSYNC.
-			 */
-			decon_wait_for_te(decon, vrefresh);
-			decon->is_first_te_triggered = true;
-			usleep_range(BOOT_DSC_REG_INIT_DELAY_US,
-				     BOOT_DSC_REG_INIT_DELAY_US + 100);
-		} else if (decon->config.dsc.delay_reg_init_us) {
-			struct drm_atomic_state *state = old_crtc_state->state;
-			unsigned int delay_us = decon->config.dsc.delay_reg_init_us;
-			struct drm_connector_state *conn_state =
-				crtc_get_connector_state(state, crtc_state);
+	if (decon->config.dsc.enabled && decon->config.dsc.delay_reg_init_us) {
+		struct drm_atomic_state *state = old_crtc_state->state;
+		struct drm_connector_state *conn_state =
+			crtc_get_connector_state(state, crtc_state);
+		unsigned int delay_us = decon->config.dsc.delay_reg_init_us;
+		unsigned int extra_delay_us =
+			DIV_ROUND_UP(MSEC_PER_SEC, vrefresh) * MSEC_PER_SEC - delay_us;
 
-			decon_wait_for_te(decon, vrefresh);
-			usleep_range(delay_us, delay_us + 100);
+		decon_wait_for_te(decon, vrefresh);
+		usleep_range(extra_delay_us, extra_delay_us + 100);
 
-			/* remove the delay */
-			if (is_exynos_drm_connector(conn_state->connector)) {
-				struct exynos_display_mode *exynos_mode =
-					&to_exynos_connector_state(conn_state)->exynos_mode;
+		/* remove the delay */
+		if (is_exynos_drm_connector(conn_state->connector)) {
+			struct exynos_display_mode *exynos_mode =
+				&to_exynos_connector_state(conn_state)->exynos_mode;
 
-				exynos_mode->dsc.delay_reg_init_us = 0;
-			}
-#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
-			else if (is_gs_drm_connector(conn_state->connector)) {
-				struct gs_display_mode *gs_mode =
-					&to_gs_connector_state(conn_state)->gs_mode;
-
-				gs_mode->dsc.delay_reg_init_us = 0;
-			}
-#endif
-			decon->config.dsc.delay_reg_init_us = 0;
+			exynos_mode->dsc.delay_reg_init_us = 0;
 		}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+		else if (is_gs_drm_connector(conn_state->connector)) {
+			struct gs_display_mode *gs_mode =
+				&to_gs_connector_state(conn_state)->gs_mode;
+
+			gs_mode->dsc.delay_reg_init_us = 0;
+		}
+#endif
+		decon->config.dsc.delay_reg_init_us = 0;
 
 		decon_dsc_reg_init(decon->id, &decon->config, 0, 0);
 	}
@@ -2230,7 +2206,7 @@ static irqreturn_t decon_te_irq_handler(int irq, void *dev_id)
 	}
 	DPU_EVENT_LOG(DPU_EVT_TE_INTERRUPT, decon->id, NULL);
 
-	if (decon->config.dsc.delay_reg_init_us || !decon->is_first_te_triggered)
+	if (decon->config.dsc.delay_reg_init_us)
 		complete_all(&decon->te_rising);
 
 	if (decon->config.mode.op_mode == DECON_COMMAND_MODE)
@@ -2534,6 +2510,48 @@ static int decon_runtime_resume(struct device *dev)
 	return 0;
 }
 
+static int decon_atomic_suspend(struct decon_device *decon)
+{
+	struct drm_modeset_acquire_ctx ctx;
+	struct drm_atomic_state *suspend_state;
+	int ret = 0;
+
+	if (!decon) {
+		decon_err(decon, "%s: decon is not ready\n", __func__);
+		return -EINVAL;
+	}
+	drm_modeset_acquire_init(&ctx, 0);
+	suspend_state = exynos_crtc_suspend(&decon->crtc->base, &ctx);
+	if (!IS_ERR(suspend_state))
+		decon->suspend_state = suspend_state;
+	else
+		ret = PTR_ERR(suspend_state);
+
+	drm_modeset_drop_locks(&ctx);
+	drm_modeset_acquire_fini(&ctx);
+	return ret;
+}
+
+static int decon_atomic_resume(struct decon_device *decon)
+{
+	struct drm_modeset_acquire_ctx ctx;
+	int ret = 0;
+
+	if (!decon) {
+		decon_err(decon, "%s: decon is not ready\n", __func__);
+		return -EINVAL;
+	}
+	drm_modeset_acquire_init(&ctx, 0);
+	if (!IS_ERR_OR_NULL(decon->suspend_state)) {
+		ret = exynos_crtc_resume(decon->suspend_state, &ctx);
+		drm_atomic_state_put(decon->suspend_state);
+	}
+	decon->suspend_state = NULL;
+	drm_modeset_drop_locks(&ctx);
+	drm_modeset_acquire_fini(&ctx);
+	return ret;
+}
+
 static int decon_suspend(struct device *dev)
 {
 	struct decon_device *decon = dev_get_drvdata(dev);
@@ -2542,7 +2560,7 @@ static int decon_suspend(struct device *dev)
 	decon_debug(decon, "%s\n", __func__);
 
 	if (!decon->hibernation)
-		return 0;
+		return decon_atomic_suspend(decon);
 
 	ret = exynos_hibernation_suspend(decon->hibernation);
 
@@ -2557,15 +2575,19 @@ static int decon_suspend(struct device *dev)
 static int decon_resume(struct device *dev)
 {
 	struct decon_device *decon = dev_get_drvdata(dev);
+	int ret = 0;
 
 	if (!decon_is_effectively_active(decon))
 		return 0;
 
 	decon_debug(decon, "%s\n", __func__);
 
+	if (!decon->hibernation)
+		ret = decon_atomic_resume(decon);
+
 	DPU_EVENT_LOG(DPU_EVT_DECON_RESUME, decon->id, NULL);
 
-	return 0;
+	return ret;
 }
 #endif
 

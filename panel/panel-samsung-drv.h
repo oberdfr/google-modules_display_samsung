@@ -39,10 +39,6 @@
 #define FIXED_TE2_VREFRESH_NORMAL	120
 #define FIXED_TE2_VREFRESH_LP		30
 
-#define HDR_DOLBY_VISION	BIT(1)
-#define HDR_HDR10		BIT(2)
-#define HDR_HLG			BIT(3)
-
 #define BL_STATE_STANDBY	BL_CORE_FBBLANK
 #define BL_STATE_LP		BIT(30) /* backlight is in LP mode */
 
@@ -762,6 +758,10 @@ struct exynos_panel {
 	bool self_refresh_active;
 	/* indicates if panel brightness is set or not after reset */
 	bool is_brightness_initialized;
+	/* indicates need to adjust vddd lp in self refresh */
+	bool need_post_vddd_lp;
+	/* adjust lp vddd in self refresh instead of mode set */
+	bool post_vddd_lp;
 	/**
 	 * refresh rate in panel idle mode
 	 * 0 means not in idle mode or not specified
