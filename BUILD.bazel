@@ -7,6 +7,7 @@ filegroup(
     srcs = [
         "dp_audio/dp_audio.h",
         "exynos_drm_connector.h",
+        "exynos_drm_format.h",
         "panel/panel-common.h",
         "panel/panel-samsung-drv.h",
         "//private/google-modules/display/common:headers",
@@ -21,10 +22,10 @@ filegroup(
 
 filegroup(
     name = "display.samsung.kconfig",
-    srcs = glob([
+    srcs = [
         "Kconfig",
         "panel/Kconfig",
-    ]),
+    ],
     visibility = [
         "//private/devices/google:__subpackages__",
         "//private/google-modules/soc/gs:__pkg__",
@@ -36,9 +37,9 @@ kernel_module(
     srcs = glob([
         "**/*.c",
         "**/*.h",
+    ]) + [
         "Kbuild",
         "panel/Kbuild",
-    ]) + [
         "//private/google-modules/aoc/alsa:headers",
         "//private/google-modules/display/samsung:headers",
         "//private/google-modules/hdcp/samsung:headers",
