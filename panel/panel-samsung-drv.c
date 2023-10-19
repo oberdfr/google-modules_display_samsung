@@ -729,8 +729,9 @@ err:
 
 static void exynos_panel_mode_set_name(struct drm_display_mode *mode)
 {
-	scnprintf(mode->name, DRM_DISPLAY_MODE_LEN, "%dx%dx%d",
-		  mode->hdisplay, mode->vdisplay, drm_mode_vrefresh(mode));
+	scnprintf(mode->name, DRM_DISPLAY_MODE_LEN, "%dx%dx%d@%d",
+		  mode->hdisplay, mode->vdisplay,
+		  drm_mode_vrefresh(mode), exynos_drm_mode_te_freq(mode));
 }
 
 const struct exynos_panel_mode *exynos_panel_get_mode(struct exynos_panel *ctx,
@@ -1835,8 +1836,8 @@ static void exynos_panel_connector_print_state(struct drm_printer *p,
 	if (ctx->current_mode) {
 		const struct drm_display_mode *m = &ctx->current_mode->mode;
 
-		drm_printf(p, " \tcurrent mode: %dx%d@%d\n", m->hdisplay,
-			   m->vdisplay, drm_mode_vrefresh(m));
+		drm_printf(p, " \tcurrent mode: %dx%dx%d@%d\n", m->hdisplay,
+			   m->vdisplay, drm_mode_vrefresh(m), exynos_drm_mode_te_freq(m));
 	}
 	drm_printf(p, "\text_info: %s\n", ctx->panel_extinfo);
 	drm_printf(p, "\tluminance: [%u, %u] avg: %u\n",
@@ -3606,11 +3607,15 @@ static int exynos_panel_bridge_atomic_check(struct drm_bridge *bridge,
 						to_exynos_connector_state(conn_state);
 		int current_vrefresh = drm_mode_vrefresh(current_mode);
 		int target_vrefresh = drm_mode_vrefresh(target_mode);
+		int current_bts_fps = exynos_drm_mode_bts_fps(current_mode);
+		int target_bts_fps = exynos_drm_mode_bts_fps(target_mode);
+
 		int clock;
 
 		if (current_mode->hdisplay != target_mode->hdisplay &&
 		    current_mode->vdisplay != target_mode->vdisplay) {
-			if (current_vrefresh != target_vrefresh) {
+			if (current_vrefresh != target_vrefresh ||
+				current_bts_fps != target_bts_fps) {
 				/*
 				 * While switching resolution and refresh rate (from high to low) in
 				 * the same commit, the frame transfer time will become longer due to
@@ -3618,14 +3623,15 @@ static int exynos_panel_bridge_atomic_check(struct drm_bridge *bridge,
 				 * vsync, which will hit DDIC’s constraint and cause the noises. Keep
 				 * the current BTS (higher one) for a few frames to avoid the problem.
 				 */
-				if (current_vrefresh > target_vrefresh) {
-					target_mode->clock = DIV_ROUND_UP(
-						target_mode->htotal * target_mode->vtotal *
-						current_vrefresh, 1000);
+				if (current_bts_fps > target_bts_fps) {
+					target_mode->clock = exynos_bts_fps_to_drm_mode_clock(
+							target_mode, current_bts_fps);
 					if (target_mode->clock != new_crtc_state->mode.clock) {
 						new_crtc_state->mode_changed = true;
-						dev_dbg(ctx->dev, "%s: keep mode (%s) clock %dhz on rrs\n",
-							__func__, target_mode->name, current_vrefresh);
+						dev_dbg(ctx->dev,
+							"%s: keep mode (%s) clock %dhz on rrs\n",
+							__func__, target_mode->name,
+							current_bts_fps);
 					}
 					clock = target_mode->clock;
 				}
@@ -3644,7 +3650,8 @@ static int exynos_panel_bridge_atomic_check(struct drm_bridge *bridge,
 					__func__, new_crtc_state->mode.name);
 			}
 
-			if (current_vrefresh != target_vrefresh)
+			if ((current_vrefresh != target_vrefresh) ||
+					(current_bts_fps != target_bts_fps))
 				ctx->mode_in_progress = MODE_RR_IN_PROGRESS;
 			else
 				ctx->mode_in_progress = MODE_DONE;
@@ -3652,11 +3659,14 @@ static int exynos_panel_bridge_atomic_check(struct drm_bridge *bridge,
 
 		if (current_mode->hdisplay != target_mode->hdisplay ||
 		    current_mode->vdisplay != target_mode->vdisplay ||
-		    current_vrefresh != target_vrefresh)
-			dev_dbg(ctx->dev, "%s: current %dx%d@%d, target %dx%d@%d, type %d\n", __func__,
-				current_mode->hdisplay, current_mode->vdisplay, current_vrefresh,
-				target_mode->hdisplay, target_mode->vdisplay, target_vrefresh,
-				ctx->mode_in_progress);
+		    current_vrefresh != target_vrefresh ||
+		    current_bts_fps != target_bts_fps)
+			dev_dbg(ctx->dev,
+				"%s: current %dx%d@%d(bts %d), target %dx%d@%d(bts %d), type %d\n",
+				__func__, current_mode->hdisplay, current_mode->vdisplay,
+				current_vrefresh, current_bts_fps,
+				target_mode->hdisplay, target_mode->vdisplay,
+				target_vrefresh, target_bts_fps, ctx->mode_in_progress);
 
 		/*
 		 * We may transfer the frame for the first TE after switching to higher
@@ -3667,8 +3677,8 @@ static int exynos_panel_bridge_atomic_check(struct drm_bridge *bridge,
 		 */
 		if ((exynos_conn_state->pending_update_flags & HBM_FLAG_OP_RATE_UPDATE) &&
 		    exynos_conn_state->operation_rate > ctx->op_hz) {
-			target_mode->clock = DIV_ROUND_UP(target_mode->htotal *
-					target_mode->vtotal * ctx->peak_vrefresh, 1000);
+			target_mode->clock =
+				exynos_bts_fps_to_drm_mode_clock(target_mode, ctx->peak_bts_fps);
 			/* use the higher clock to avoid underruns */
 			if (target_mode->clock < clock)
 				target_mode->clock = clock;
@@ -3677,7 +3687,7 @@ static int exynos_panel_bridge_atomic_check(struct drm_bridge *bridge,
 				new_crtc_state->mode_changed = true;
 				ctx->boosted_for_op_hz = true;
 				dev_dbg(ctx->dev, "%s: raise mode clock %dhz on op_hz %d\n",
-					__func__, ctx->peak_vrefresh,
+					__func__, ctx->peak_bts_fps,
 					exynos_conn_state->operation_rate);
 			}
 		} else if (ctx->boosted_for_op_hz &&
@@ -3985,7 +3995,7 @@ static void exynos_panel_check_mipi_sync_timing(struct drm_crtc *crtc,
 		return;
 
 	DPU_ATRACE_BEGIN("mipi_time_window");
-	te_period_us = USEC_PER_SEC / drm_mode_vrefresh(&current_mode->mode);
+	te_period_us = USEC_PER_SEC / exynos_drm_mode_te_freq(&current_mode->mode);
 
 	if (funcs && funcs->get_te_usec)
 		te_usec = funcs->get_te_usec(ctx, current_mode);
@@ -4056,7 +4066,7 @@ static void exynos_panel_check_mipi_sync_timing(struct drm_crtc *crtc,
 		since_last_te_us = ktime_us_delta(now, last_te);
 		if (!vblank_taken) {
 			ktime_t predicted_te = exynos_panel_te_ts_prediction(ctx, last_te,
-					USEC_PER_SEC / drm_mode_vrefresh(&current_mode->mode));
+				USEC_PER_SEC / exynos_drm_mode_te_freq(&current_mode->mode));
 			if (predicted_te) {
 				DPU_ATRACE_BEGIN("predicted_te");
 				last_te = predicted_te;
@@ -4324,12 +4334,15 @@ static void exynos_panel_bridge_mode_set(struct drm_bridge *bridge,
 		ctx->current_mode = pmode;
 	}
 
-	if (old_mode && drm_mode_vrefresh(&pmode->mode) != drm_mode_vrefresh(&old_mode->mode)) {
+	if (old_mode &&
+		(drm_mode_vrefresh(&pmode->mode) != drm_mode_vrefresh(&old_mode->mode) ||
+		 exynos_drm_mode_bts_fps(&pmode->mode) !=
+			exynos_drm_mode_bts_fps(&old_mode->mode))) {
 		/* save the context in order to predict TE width in
 		 * exynos_panel_check_mipi_sync_timing
 		 */
 		ctx->last_rr_switch_ts = ktime_get();
-		ctx->last_rr = drm_mode_vrefresh(&old_mode->mode);
+		ctx->last_rr = exynos_drm_mode_te_freq(&old_mode->mode);
 		ctx->last_rr_te_gpio_value = gpio_get_value(exynos_connector_state->te_gpio);
 		ctx->last_rr_te_counter = drm_crtc_vblank_count(crtc);
 		if (ctx->desc->exynos_panel_func && ctx->desc->exynos_panel_func->get_te_usec)
@@ -4742,9 +4755,13 @@ int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 	for (i = 0; i < ctx->desc->num_modes; i++) {
 		const struct exynos_panel_mode *pmode = &ctx->desc->modes[i];
 		const int vrefresh = drm_mode_vrefresh(&pmode->mode);
+		const int bts_fps = exynos_drm_mode_bts_fps(&pmode->mode);
 
 		if (ctx->peak_vrefresh < vrefresh)
 			ctx->peak_vrefresh = vrefresh;
+
+		if (ctx->peak_bts_fps < bts_fps)
+			ctx->peak_bts_fps = bts_fps;
 
 		exynos_panel_check_mode_clock(ctx, &pmode->mode);
 	}

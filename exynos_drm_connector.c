@@ -343,3 +343,24 @@ int exynos_drm_connector_create_properties(struct drm_device *dev)
 
 	return exynos_drm_connector_create_hdr_formats_property(dev);
 }
+
+int exynos_drm_mode_te_freq(const struct drm_display_mode *mode)
+{
+	/* TODO: get te frequency per drm_display_mode */
+	return drm_mode_vrefresh(mode);
+}
+EXPORT_SYMBOL_GPL(exynos_drm_mode_te_freq);
+
+int exynos_drm_mode_bts_fps(const struct drm_display_mode *mode)
+{
+	/* TODO: get bts fps*/
+	return drm_mode_vrefresh(mode);
+}
+EXPORT_SYMBOL_GPL(exynos_drm_mode_bts_fps);
+
+int exynos_bts_fps_to_drm_mode_clock(const struct drm_display_mode *mode, int bts_fps)
+{
+	/* TOD: calculate required mode clock correctly */
+	return DIV_ROUND_UP(mode->htotal * mode->vtotal * bts_fps, 1000);
+}
+EXPORT_SYMBOL_GPL(exynos_bts_fps_to_drm_mode_clock);

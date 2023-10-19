@@ -750,6 +750,11 @@ struct exynos_panel {
 	 */
 	int peak_vrefresh;
 	/**
+	 * indicates the supported max bts fps in the panel.
+	 */
+	int peak_bts_fps;
+
+	/**
 	 * When the value is set to non-zero value, the panel
 	 * driver kernel idle timer will be disabled internally
 	 * (similar to writing 0 to panel_idle sysfs node) for

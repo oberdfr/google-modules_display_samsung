@@ -890,15 +890,15 @@ static void decon_wait_earliest_process_time(
 {
 	const struct drm_crtc_state *old_crtc_state = &old_exynos_crtc_state->base;
 	const struct drm_crtc_state *new_crtc_state = &new_exynos_crtc_state->base;
-	int32_t vrefresh, vsync_period_ns;
+	int32_t te_freq, vsync_period_ns;
 	ktime_t earliest_process_time, now;
 
-	vrefresh = drm_mode_vrefresh(&old_crtc_state->mode);
-	if (vrefresh == 0) {
+	te_freq = exynos_drm_mode_te_freq(&old_crtc_state->mode);
+	if (te_freq == 0) {
 		/* decon just be enabled */
-		vrefresh = drm_mode_vrefresh(&new_crtc_state->mode);
+		te_freq = exynos_drm_mode_te_freq(&new_crtc_state->mode);
 	}
-	vsync_period_ns = mult_frac(1000, 1000 * 1000, vrefresh);
+	vsync_period_ns = mult_frac(1000, 1000 * 1000, te_freq);
 	if (ktime_compare(new_exynos_crtc_state->expected_present_time,
 				vsync_period_ns - VSYNC_PERIOD_VARIANCE_NS) <= 0) {
 		return;
@@ -1133,7 +1133,7 @@ static void decon_mode_update_bts(struct decon_device *decon,
 	decon->bts.vbp = vm.vback_porch;
 	decon->bts.vfp = vm.vfront_porch;
 	decon->bts.vsa = vm.vsync_len;
-	decon->bts.fps = drm_mode_vrefresh(mode);
+	decon->bts.fps = exynos_drm_mode_bts_fps(mode);
 	decon->bts.vblank_usec = vblank_usec;
 
 	decon->config.image_width = mode->hdisplay;
@@ -1155,7 +1155,7 @@ static void decon_seamless_mode_bts_update(struct decon_device *decon,
 	DPU_ATRACE_BEGIN(__func__);
 
 	decon_debug(decon, "seamless mode change from %dhz to %dhz\n",
-		    decon->bts.fps, drm_mode_vrefresh(mode));
+		    decon->bts.fps, exynos_drm_mode_bts_fps(mode));
 
 	/*
 	 * when going from high->low refresh rate need to run with the higher fps while the
@@ -1164,7 +1164,7 @@ static void decon_seamless_mode_bts_update(struct decon_device *decon,
 	 * TODO: change to 3 to extend the time of higher fps due to b/196466885. Restore to
 	 * 2 once the issue is clarified.
 	 */
-	if (decon->bts.fps > drm_mode_vrefresh(mode)) {
+	if (decon->bts.fps > exynos_drm_mode_bts_fps(mode)) {
 		decon->bts.pending_vblank_usec = vblank_usec;
 		atomic_set(&decon->bts.delayed_update, 3);
 	} else {
@@ -1349,9 +1349,9 @@ static void decon_exit_hibernation(struct decon_device *decon)
 	DPU_EVENT_LOG(DPU_EVT_EXIT_HIBERNATION_OUT, decon->id, NULL);
 }
 
-static void decon_wait_for_te(struct decon_device *decon, int vrefresh)
+static void decon_wait_for_te(struct decon_device *decon, int te_freq)
 {
-	unsigned int te_period_ms = DIV_ROUND_UP(MSEC_PER_SEC, vrefresh);
+	unsigned int te_period_ms = DIV_ROUND_UP(MSEC_PER_SEC, te_freq);
 
 	reinit_completion(&decon->te_rising);
 
@@ -1359,7 +1359,7 @@ static void decon_wait_for_te(struct decon_device *decon, int vrefresh)
 
 	/* Wait for next TE rising or one TE period */
 	if (!wait_for_completion_timeout(&decon->te_rising, te_period_ms))
-		decon_debug(decon, "%s: exceed 1 TE period for %dhz\n", __func__, vrefresh);
+		decon_debug(decon, "%s: exceed 1 TE period for TE %dhz\n", __func__, te_freq);
 
 	DPU_ATRACE_END(__func__);
 }
@@ -1370,6 +1370,7 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 	struct exynos_drm_crtc_state *old_exynos_crtc_state = to_exynos_crtc_state(old_crtc_state);
 	struct decon_device *decon = exynos_crtc->ctx;
 	int vrefresh = drm_mode_vrefresh(&old_crtc_state->mode);
+	int te_freq = exynos_drm_mode_te_freq(&old_crtc_state->mode);
 	unsigned long flags;
 
 	if (decon->state == DECON_STATE_ON) {
@@ -1454,9 +1455,9 @@ ret:
 			crtc_get_connector_state(state, crtc_state);
 		unsigned int delay_us = decon->config.dsc.delay_reg_init_us;
 		unsigned int extra_delay_us =
-			DIV_ROUND_UP(MSEC_PER_SEC, vrefresh) * MSEC_PER_SEC - delay_us;
+			DIV_ROUND_UP(MSEC_PER_SEC, te_freq) * MSEC_PER_SEC - delay_us;
 
-		decon_wait_for_te(decon, vrefresh);
+		decon_wait_for_te(decon, te_freq);
 		usleep_range(extra_delay_us, extra_delay_us + 100);
 
 		/* remove the delay */
