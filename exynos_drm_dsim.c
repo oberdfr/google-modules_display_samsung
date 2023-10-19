@@ -1121,7 +1121,7 @@ static void _update_config_timing(struct dsim_reg_config *config,
 	p_timing->hfp = vm.hfront_porch;
 	p_timing->hbp = vm.hback_porch;
 	p_timing->hsa = vm.hsync_len;
-	p_timing->vrefresh = drm_mode_vrefresh(mode);
+	p_timing->vrefresh = exynos_drm_mode_bts_fps(mode);
 	if (has_underrun_param) {
 		p_timing->te_idle_us = te_idle_us;
 		p_timing->te_var = te_var;
