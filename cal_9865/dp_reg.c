@@ -1224,9 +1224,18 @@ static void dp_reg_set_aux_reply_timeout(void)
 		      AUX_REPLY_TIMER_MODE_MASK);
 }
 
-static void dp_reg_set_aux_pn(enum plug_orientation orient)
+static void dp_reg_set_aux_pn(enum plug_orientation orient, bool aux_auto_orientation)
 {
-	u32 val = (orient == PLUG_FLIPPED) ? AUX_PN_INVERT : AUX_PN_NORMAL;
+	u32 val;
+
+	/*
+	 * When aux_auto_orientation is true, then the AUX pin is set by
+	 * the USB stack so set to normal unconditionally.
+	 */
+	if (aux_auto_orientation)
+		val = AUX_PN_NORMAL;
+	else
+		val = (orient == PLUG_FLIPPED) ? AUX_PN_INVERT : AUX_PN_NORMAL;
 
 	dp_write_mask(SST1, AUX_CONTROL, val, AUX_PN_INV_MASK);
 }
@@ -2363,7 +2372,7 @@ void dp_hw_init(struct dp_hw_config *hw_config)
 	 */
 	/* Set Lane Map Configuration */
 	dp_reg_set_lane_count(hw_config->num_lanes);
-	dp_reg_set_aux_pn(hw_config->orient_type);
+	dp_reg_set_aux_pn(hw_config->orient_type, hw_config->aux_auto_orientation);
 	dp_hw_set_lane_map_config(hw_config);
 	cal_log_debug(0, "set lane count & map\n");
 
@@ -2412,7 +2421,7 @@ void dp_hw_reinit(struct dp_hw_config *hw_config)
 
 	/* Set Lane Map Configuration */
 	dp_reg_set_lane_count(hw_config->num_lanes);
-	dp_reg_set_aux_pn(hw_config->orient_type);
+	dp_reg_set_aux_pn(hw_config->orient_type, hw_config->aux_auto_orientation);
 	dp_hw_set_lane_map_config(hw_config);
 	cal_log_debug(0, "set lane count & map\n");
 

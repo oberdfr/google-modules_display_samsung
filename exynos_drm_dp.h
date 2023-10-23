@@ -199,6 +199,7 @@ struct dp_device {
 	enum plug_orientation typec_orientation;
 	enum pin_assignment typec_pin_assignment;
 	enum link_training_status typec_link_training_status;
+	bool aux_auto_orientation;
 
 	/* DP Link CRCs enabled */
 	bool dp_link_crc_enabled;

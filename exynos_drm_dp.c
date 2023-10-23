@@ -1876,6 +1876,8 @@ static int usb_typec_dp_notification_locked(struct dp_device *dp, enum hotplug_s
 				dp->typec_pin_assignment);
 			dp->hw_config.pin_type = dp->typec_pin_assignment;
 
+			dp->hw_config.aux_auto_orientation = dp->aux_auto_orientation;
+
 			dp_hpd_changed(dp, EXYNOS_HPD_PLUG);
 		}
 	} else if (hpd == EXYNOS_HPD_IRQ) {
@@ -2663,6 +2665,10 @@ static int dp_probe(struct platform_device *pdev)
 		dp_err(dp, "failed to init dp resources.\n");
 		return ret;
 	}
+
+	ret = of_property_match_string(dp->dev->of_node, "aux-orientation", "auto");
+	if (ret >= 0)
+		dp->aux_auto_orientation = true;
 
 	platform_set_drvdata(pdev, dp);
 

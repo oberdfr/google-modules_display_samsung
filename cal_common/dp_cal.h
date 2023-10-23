@@ -269,6 +269,7 @@ struct dp_hw_config {
 	/* USB Type-C */
 	enum pin_assignment pin_type;
 	enum plug_orientation orient_type;
+	bool aux_auto_orientation;
 
 	/* DP Link */
 	enum dp_link_rate_type link_rate;
