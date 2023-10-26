@@ -36,6 +36,16 @@ enum exynos_mipi_sync_mode {
 
 struct exynos_drm_connector;
 
+/* customized DRM mode type and flags */
+#define DRM_MODE_TYPE_VRR DRM_MODE_TYPE_USERDEF
+#define DRM_MODE_FLAG_NS DRM_MODE_FLAG_CLKDIV2
+#define DRM_MODE_FLAG_TE_FREQ_X1 DRM_MODE_FLAG_PHSYNC
+#define DRM_MODE_FLAG_TE_FREQ_X2 DRM_MODE_FLAG_NHSYNC
+#define DRM_MODE_FLAG_TE_FREQ_X4 DRM_MODE_FLAG_PVSYNC
+#define DRM_MODE_FLAG_TE_FREQ_MASK (DRM_MODE_FLAG_TE_FREQ_X1 | \
+				    DRM_MODE_FLAG_TE_FREQ_X2 | \
+				    DRM_MODE_FLAG_TE_FREQ_X4)
+
 /** Private DSI msg flags **/
 
 /* Stack all commands until lastcommand bit and trigger all in one go */

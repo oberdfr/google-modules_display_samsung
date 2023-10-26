@@ -346,8 +346,14 @@ int exynos_drm_connector_create_properties(struct drm_device *dev)
 
 int exynos_drm_mode_te_freq(const struct drm_display_mode *mode)
 {
-	/* TODO: get te frequency per drm_display_mode */
-	return drm_mode_vrefresh(mode);
+	int freq = drm_mode_vrefresh(mode);
+
+	if (mode->flags & DRM_MODE_FLAG_TE_FREQ_X2)
+		freq *= 2;
+	else if (mode->flags & DRM_MODE_FLAG_TE_FREQ_X4)
+		freq *= 4;
+
+	return freq;
 }
 EXPORT_SYMBOL_GPL(exynos_drm_mode_te_freq);
 
