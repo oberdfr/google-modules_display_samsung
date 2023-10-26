@@ -976,16 +976,6 @@ static inline ssize_t exynos_get_te2_type_len(struct exynos_panel *ctx, bool lp_
 		ctx->desc->num_modes);
 }
 
-static inline void backlight_state_changed(struct backlight_device *bl)
-{
-	sysfs_notify(&bl->dev.kobj, NULL, "state");
-}
-
-static inline void te2_state_changed(struct backlight_device *bl)
-{
-	sysfs_notify(&bl->dev.kobj, NULL, "te2_state");
-}
-
 static inline u32 get_current_frame_duration_us(struct exynos_panel *ctx)
 {
 	return USEC_PER_SEC / drm_mode_vrefresh(&ctx->current_mode->mode);
