@@ -1317,6 +1317,8 @@ static int dsim_atomic_check_exynos(const struct dsim_device *dsim,
 
 		exynos_conn_state->te_from = dsim->te_from;
 		exynos_conn_state->te_gpio = dsim->te_gpio;
+		if (dsim->tout_gpio >= 0)
+			exynos_conn_state->tout_gpio = dsim->tout_gpio;
 	}
 	return 0;
 }
@@ -1367,6 +1369,8 @@ static int dsim_atomic_check_gs(const struct dsim_device *dsim, struct drm_crtc_
 
 		gs_conn_state->te_from = dsim->te_from;
 		gs_conn_state->te_gpio = dsim->te_gpio;
+		if (dsim->tout_gpio >= 0)
+			gs_conn_state->tout_gpio = dsim->tout_gpio;
 	}
 	return 0;
 }
@@ -1746,6 +1750,10 @@ static int dsim_parse_dt(struct dsim_device *dsim)
 			dsim->te_from = MAX_DECON_TE_FROM_DDI;
 		}
 	}
+
+	dsim->tout_gpio = of_get_named_gpio(np, "tout-gpio", 0);
+	if (dsim->tout_gpio < 0)
+		dsim_warn(dsim, "failed to get TOUT (TE2) gpio\n");
 
 	return 0;
 }

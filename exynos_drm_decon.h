@@ -451,6 +451,7 @@ struct decon_debug {
 
 	u32 te_cnt;
 	bool force_te_on;
+	bool tout_en;
 };
 
 struct decon_device {
@@ -485,10 +486,13 @@ struct decon_device {
 	u32				irq_fd;	/* frame done irq number*/
 	u32				irq_ext;/* extra irq number*/
 	int				irq_te;
+	int				irq_tout;
 	int				irq_ds;	/* dimming start irq number */
 	int				irq_de;	/* dimming end irq number */
 	int				te_gpio;
+	int				tout_gpio;
 	atomic_t			te_ref;
+	atomic_t			tout_ref;
 
 	spinlock_t			slock;
 
@@ -531,6 +535,7 @@ void decon_dump_locked(const struct decon_device *decon, struct drm_printer *p);
 void decon_dump_all(struct decon_device *decon,
 		enum dpu_event_condition cond, bool async_buf_dump);
 void decon_enable_te_irq(struct decon_device *decon, bool enable);
+void decon_enable_tout_irq(struct decon_device *decon, bool enable);
 void decon_dump_event_condition(const struct decon_device *decon,
 		enum dpu_event_condition condition);
 int dpu_init_debug(struct decon_device *decon);

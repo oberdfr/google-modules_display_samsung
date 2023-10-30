@@ -78,6 +78,7 @@ struct dsim_device {
 	enum exynos_drm_output_type output_type;
 	int te_from;
 	int te_gpio;
+	int tout_gpio;
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *te_on;
 	struct pinctrl_state *te_off;

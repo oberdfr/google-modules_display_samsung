@@ -83,6 +83,7 @@ static void decon_seamless_mode_set(struct exynos_drm_crtc *exynos_crtc,
 				    struct drm_crtc_state *old_crtc_state);
 static int decon_request_te_irq(struct exynos_drm_crtc *exynos_crtc,
 				const struct drm_connector_state *conn_state);
+static void decon_request_tout_irq(struct decon_device *decon);
 static bool decon_check_fs_pending_locked(struct decon_device *decon);
 
 #ifdef CONFIG_BOARD_EMULATOR
@@ -213,6 +214,55 @@ void decon_enable_te_irq(struct decon_device *decon, bool enable)
 			disable_irq_nosync(decon->irq_te);
 		else if (ret < 0)
 			WARN(1, "unbalanced te irq (%d)\n", ret);
+	}
+}
+
+static void decon_set_tout_gpio(struct exynos_drm_crtc *exynos_crtc,
+				const struct drm_connector_state *conn_state)
+{
+	struct decon_device *decon = exynos_crtc->ctx;
+	int tout_gpio;
+
+	if (WARN_ON(!conn_state)) {
+		decon_warn(decon, "%s: conn_state is null!\n", __func__);
+		return;
+	}
+
+	if (is_exynos_drm_connector(conn_state->connector)) {
+		tout_gpio = to_exynos_connector_state(conn_state)->tout_gpio;
+		if (tout_gpio > 0)
+			decon->tout_gpio = tout_gpio;
+	}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	else if (is_gs_drm_connector(conn_state->connector)) {
+		tout_gpio = to_gs_connector_state(conn_state)->tout_gpio;
+		if (tout_gpio > 0)
+			decon->tout_gpio = tout_gpio;
+	}
+#endif
+	else {
+		decon_warn(decon, "%s: invalid drm connector!\n", __func__);
+	}
+}
+
+void decon_enable_tout_irq(struct decon_device *decon, bool enable)
+{
+	decon_info(decon, "%s: en %d, ref %d\n", __func__,
+		   enable, atomic_read(&decon->tout_ref));
+
+	if (enable) {
+		if (atomic_inc_return(&decon->tout_ref) == 1)
+			decon_request_tout_irq(decon);
+	} else {
+		int ret = atomic_dec_if_positive(&decon->tout_ref);
+		if (!ret) {
+			disable_irq_nosync(decon->irq_tout);
+			devm_free_irq(decon->dev, decon->irq_tout, decon);
+			decon->irq_tout = -1;
+			decon->tout_gpio = 0;
+		} else if (ret < 0) {
+			decon_warn(decon, "unexpected tout_ref (%d)\n", ret);
+		}
 	}
 }
 
@@ -1433,6 +1483,8 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 
 		if (decon_is_te_enabled(decon))
 			decon_request_te_irq(exynos_crtc, conn_state);
+
+		decon_set_tout_gpio(exynos_crtc, conn_state);
 	}
 
 	pm_runtime_get_sync(decon->dev);
@@ -2225,6 +2277,38 @@ static int decon_request_te_irq(struct exynos_drm_crtc *exynos_crtc,
 	}
 
 	return ret;
+}
+
+static irqreturn_t decon_tout_irq_handler(int irq, void *dev_id)
+{
+	struct decon_device *decon = dev_id;
+
+	if (!decon)
+		goto end;
+
+	pr_debug("%s: state(%d)\n", __func__, decon->state);
+
+	if (decon->tout_gpio > 0)
+		DPU_ATRACE_INT_PID("TE2", gpio_get_value(decon->tout_gpio),
+				   decon->thread->pid);
+
+end:
+	return IRQ_HANDLED;
+}
+
+static void decon_request_tout_irq(struct decon_device *decon)
+{
+	int irq = gpio_to_irq(decon->tout_gpio);
+
+	irq_set_status_flags(irq, IRQ_DISABLE_UNLAZY);
+	if (!devm_request_irq(decon->dev, irq, decon_tout_irq_handler,
+			      IRQF_TRIGGER_RISING | IRQF_TRIGGER_FALLING,
+			      "exynos-crtc-0", decon)) {
+		decon->irq_tout = irq;
+		decon_info(decon, "requested irq for tout (te2)\n");
+	} else {
+		decon_warn(decon, "failed to request irq for tout (te2)\n");
+	}
 }
 
 static int decon_register_irqs(struct decon_device *decon)

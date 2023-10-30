@@ -1668,6 +1668,51 @@ static const struct file_operations force_te_fops = {
 	.release = seq_release,
 };
 
+static ssize_t tout_write(struct file *file, const char __user *buffer,
+			  size_t len, loff_t *ppos)
+{
+	struct seq_file *s = file->private_data;
+	struct decon_device *decon = s->private;
+	unsigned long flags;
+	int ret;
+	bool en;
+
+	ret = kstrtobool_from_user(buffer, len, &en);
+	if (ret)
+		return ret;
+
+	spin_lock_irqsave(&decon->slock, flags);
+	if (en != decon->d.tout_en) {
+		decon_enable_tout_irq(decon, en);
+		decon->d.tout_en = en;
+	}
+	spin_unlock_irqrestore(&decon->slock, flags);
+
+	return len;
+}
+
+static int tout_show(struct seq_file *s, void *unused)
+{
+	struct decon_device *decon = s->private;
+
+	seq_printf(s, "%d\n", decon->d.tout_en);
+
+	return 0;
+}
+
+static int tout_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, tout_show, inode->i_private);
+}
+
+static const struct file_operations tout_fops = {
+	.open = tout_open,
+	.read = seq_read,
+	.write = tout_write,
+	.llseek = seq_lseek,
+	.release = seq_release,
+};
+
 int dpu_init_debug(struct decon_device *decon)
 {
 	int i;
@@ -1732,6 +1777,7 @@ int dpu_init_debug(struct decon_device *decon)
 		pr_warn("unable to add decon_debug sysfs files (%d)\n", ret);
 
 	debugfs_create_file("force_te_on", 0664, crtc->debugfs_entry, decon, &force_te_fops);
+	debugfs_create_file("tout_en", 0664, crtc->debugfs_entry, decon, &tout_fops);
 	debugfs_create_u32("underrun_cnt", 0664, crtc->debugfs_entry, &decon->d.underrun_cnt);
 	debugfs_create_u32("crc_cnt", 0444, crtc->debugfs_entry, &decon->d.crc_cnt);
 	debugfs_create_u32("ecc_cnt", 0444, crtc->debugfs_entry, &decon->d.ecc_cnt);
