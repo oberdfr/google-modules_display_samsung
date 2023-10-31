@@ -394,6 +394,17 @@ static void exynos_atomic_bts_pre_update(struct drm_device *dev,
 					new_conn_state, i) {
 		bool old_job, new_job;
 
+		if (new_conn_state) {
+			struct exynos_drm_connector_state *exynos_connector_state =
+				to_exynos_connector_state(new_conn_state);
+			if (exynos_connector_state->update_operation_rate_to_bts) {
+				exynos_connector_state->update_operation_rate_to_bts = false;
+				decon = crtc_to_decon(new_conn_state->crtc);
+				decon_mode_bts_op_rate_update(decon,
+						exynos_connector_state->operation_rate);
+			}
+		}
+
 		if (conn->connector_type != DRM_MODE_CONNECTOR_WRITEBACK)
 			continue;
 

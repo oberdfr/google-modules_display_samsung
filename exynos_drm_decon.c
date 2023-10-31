@@ -1137,13 +1137,16 @@ static void decon_mode_update_bts(struct decon_device *decon,
 				const unsigned int vblank_usec)
 {
 	struct videomode vm;
+	int mode_bts_fps = exynos_drm_mode_bts_fps(mode);
 
 	drm_display_mode_to_videomode(mode, &vm);
 
 	decon->bts.vbp = vm.vback_porch;
 	decon->bts.vfp = vm.vfront_porch;
 	decon->bts.vsa = vm.vsync_len;
-	decon->bts.fps = exynos_drm_mode_bts_fps(mode);
+	decon->bts.fps = (mode_bts_fps >= decon->bts.op_rate ||
+				!IS_BTS2OPRATE_MODE(mode->flags)) ?
+					mode_bts_fps : decon->bts.op_rate;
 	decon->bts.vblank_usec = vblank_usec;
 
 	decon->config.image_width = mode->hdisplay;
@@ -1162,10 +1165,15 @@ static void decon_seamless_mode_bts_update(struct decon_device *decon,
 					const struct drm_display_mode *mode,
 					const unsigned int vblank_usec)
 {
+	int mode_bts_fps = exynos_drm_mode_bts_fps(mode);
+	int request_bts_fps = (mode_bts_fps >= decon->bts.op_rate ||
+				!IS_BTS2OPRATE_MODE(mode->flags)) ?
+					mode_bts_fps : decon->bts.op_rate;
+
 	DPU_ATRACE_BEGIN(__func__);
 
 	decon_debug(decon, "seamless mode change from %dhz to %dhz\n",
-		    decon->bts.fps, exynos_drm_mode_bts_fps(mode));
+		    decon->bts.fps, request_bts_fps);
 
 	/*
 	 * when going from high->low refresh rate need to run with the higher fps while the
@@ -1174,7 +1182,7 @@ static void decon_seamless_mode_bts_update(struct decon_device *decon,
 	 * TODO: change to 3 to extend the time of higher fps due to b/196466885. Restore to
 	 * 2 once the issue is clarified.
 	 */
-	if (decon->bts.fps > exynos_drm_mode_bts_fps(mode)) {
+	if (decon->bts.fps > request_bts_fps) {
 		decon->bts.pending_vblank_usec = vblank_usec;
 		atomic_set(&decon->bts.delayed_update, 3);
 	} else {
@@ -1217,11 +1225,12 @@ void decon_mode_bts_pre_update(struct decon_device *decon,
 	const struct exynos_drm_crtc_state *exynos_crtc_state = to_exynos_crtc_state(crtc_state);
 	unsigned int vblank_usec = 0;
 
-	if (exynos_crtc_state->seamless_mode_changed) {
+	if (exynos_crtc_state->seamless_mode_changed || decon->bts.pending_fps_update) {
 		if (decon->config.mode.op_mode == DECON_COMMAND_MODE)
 			vblank_usec = decon_get_vblank_usec(crtc_state, old_state);
 
 		decon_seamless_mode_bts_update(decon, &crtc_state->adjusted_mode, vblank_usec);
+		decon->bts.pending_fps_update = false;
 	} else if (drm_atomic_crtc_needs_modeset(crtc_state)) {
 		if (decon->config.mode.op_mode == DECON_COMMAND_MODE)
 			vblank_usec = decon_get_vblank_usec(crtc_state, old_state);
@@ -1233,6 +1242,12 @@ void decon_mode_bts_pre_update(struct decon_device *decon,
 
 	decon->bts.ops->calc_bw(decon);
 	decon->bts.ops->update_bw(decon, false);
+}
+
+void decon_mode_bts_op_rate_update(struct decon_device *decon, u32 op_rate)
+{
+	decon->bts.op_rate = op_rate;
+	decon->bts.pending_fps_update = true;
 }
 #endif
 

@@ -131,6 +131,7 @@ struct decon_win_config {
 
 struct dpu_bts {
 	bool enabled;
+	bool pending_fps_update;
 	u32 resol_clk;
 	u32 peak;
 	u32 prev_peak;
@@ -162,6 +163,7 @@ struct dpu_bts {
 	u32 vfp;
 	u32 vsa;
 	u32 fps;
+	u32 op_rate;
 	u32 pending_vblank_usec;
 	u32 vblank_usec;
 	/* includes writeback dpp */
@@ -366,6 +368,7 @@ struct dpu_log_bts_cal {
 	u32 write_bw;
 	u32 fps; /* bts fps */
 	u32 crtc_fps; /* crtc fps */
+	u32 op_rate;
 };
 
 struct dpu_log_bts_event {
@@ -541,10 +544,14 @@ void decon_force_vblank_event(struct decon_device *decon);
 void decon_mode_bts_pre_update(struct decon_device *decon,
 				const struct drm_crtc_state *crtc_state,
 				const struct drm_atomic_state *state);
+void decon_mode_bts_op_rate_update(struct decon_device *decon,
+				const u32 op_rate);
 #else
 static inline void decon_mode_bts_pre_update(struct decon_device *decon,
 				const struct drm_crtc_state *crtc_state,
 				const struct drm_atomic_state *state) { }
+static inline void decon_mode_bts_op_rate_update(struct decon_device *decon,
+				const u32 op_rate) { }
 #endif
 
 #if IS_ENABLED(CONFIG_EXYNOS_ITMON)

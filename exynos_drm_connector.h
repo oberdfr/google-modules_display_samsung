@@ -46,6 +46,10 @@ struct exynos_drm_connector;
 				    DRM_MODE_FLAG_TE_FREQ_X2 | \
 				    DRM_MODE_FLAG_TE_FREQ_X4)
 
+// BTS need takes operation rate into account
+#define DRM_MODE_FLAG_BTS_OP_RATE DRM_MODE_FLAG_NVSYNC
+#define IS_BTS2OPRATE_MODE(t) ((t) & DRM_MODE_FLAG_BTS_OP_RATE)
+
 /** Private DSI msg flags **/
 
 /* Stack all commands until lastcommand bit and trigger all in one go */
@@ -209,6 +213,9 @@ struct exynos_drm_connector_state {
 
 	/* @operation_rate: panel operation rate */
 	unsigned int operation_rate;
+
+	/* @update_operation_rate_to_bts: update panel operation rate to BTS requirement */
+	bool update_operation_rate_to_bts;
 };
 
 #define to_exynos_connector_state(connector_state) \
