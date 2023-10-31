@@ -2067,6 +2067,7 @@ static int exynos_panel_connector_set_property(
 	} else if (property == p->operation_rate) {
 		exynos_state->pending_update_flags |= HBM_FLAG_OP_RATE_UPDATE;
 		exynos_state->operation_rate = val;
+		exynos_state->update_operation_rate_to_bts = true;
 		dev_dbg(ctx->dev, "%s: operation_rate(%u)\n", __func__, exynos_state->operation_rate);
 	} else if (property == p->mipi_sync) {
 		exynos_state->mipi_sync = val;
@@ -4501,8 +4502,8 @@ static void exynos_panel_bridge_mode_set(struct drm_bridge *bridge,
 
 	if (old_mode &&
 		(drm_mode_vrefresh(&pmode->mode) != drm_mode_vrefresh(&old_mode->mode) ||
-		 exynos_drm_mode_bts_fps(&pmode->mode) !=
-			exynos_drm_mode_bts_fps(&old_mode->mode))) {
+		 exynos_drm_mode_te_freq(&pmode->mode) !=
+			exynos_drm_mode_te_freq(&old_mode->mode))) {
 		/* save the context in order to predict TE width in
 		 * exynos_panel_check_mipi_sync_timing
 		 */

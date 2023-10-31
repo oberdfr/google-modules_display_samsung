@@ -632,9 +632,9 @@ struct exynos_panel_desc {
 	 * 2. not allow switch refresh rate when lhbm is on
 	 *    - if `freq set` is changed when lhbm is on, lhbm may not work normally.
 	 */
-	bool no_lhbm_rr_constraints;
+	const bool no_lhbm_rr_constraints;
 	/* schedule sysfs_notify in workq */
-	bool use_async_notify;
+	const bool use_async_notify;
 	const u32 lhbm_post_cmd_delay_frames;
 	const u32 lhbm_effective_delay_frames;
 	/**
