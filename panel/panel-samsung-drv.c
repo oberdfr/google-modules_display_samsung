@@ -1847,8 +1847,7 @@ static void exynos_panel_connector_print_state(struct drm_printer *p,
 	if (ctx->current_mode) {
 		const struct drm_display_mode *m = &ctx->current_mode->mode;
 
-		drm_printf(p, " \tcurrent mode: %dx%dx%d@%d\n", m->hdisplay,
-			   m->vdisplay, drm_mode_vrefresh(m), exynos_drm_mode_te_freq(m));
+		drm_printf(p, " \tcurrent mode: %s te@%d\n", m->name, exynos_drm_mode_te_freq(m));
 	}
 	drm_printf(p, "\text_info: %s\n", ctx->panel_extinfo);
 	drm_printf(p, "\tluminance: [%u, %u] avg: %u\n",
@@ -3678,11 +3677,9 @@ static int exynos_panel_bridge_atomic_check(struct drm_bridge *bridge,
 		    current_vrefresh != target_vrefresh ||
 		    current_bts_fps != target_bts_fps)
 			dev_dbg(ctx->dev,
-				"%s: current %dx%d@%d(bts %d), target %dx%d@%d(bts %d), type %d\n",
-				__func__, current_mode->hdisplay, current_mode->vdisplay,
-				current_vrefresh, current_bts_fps,
-				target_mode->hdisplay, target_mode->vdisplay,
-				target_vrefresh, target_bts_fps, ctx->mode_in_progress);
+				"%s: current %s(bts %d), target %s(bts %d), type %d\n",
+				__func__, current_mode->name, current_bts_fps,
+				target_mode->name, target_bts_fps, ctx->mode_in_progress);
 
 		/*
 		 * We may transfer the frame for the first TE after switching to higher
@@ -4327,10 +4324,15 @@ static void exynos_panel_bridge_mode_set(struct drm_bridge *bridge,
 
 				funcs->mode_set(ctx, pmode);
 				state_changed = true;
+			} else if (ctx->mode_in_progress == MODE_RES_IN_PROGRESS ||
+				ctx->mode_in_progress == MODE_RES_AND_RR_IN_PROGRESS) {
+				dev_dbg(ctx->dev,
+					"defer mode %s switch until enabling panel\n",
+					pmode->mode.name);
 			} else {
 				dev_warn(ctx->dev,
-					"don't do mode change (`%s`) when panel isn't in interactive mode\n",
-					pmode->mode.name);
+					"skip mode %s switch when panel isn't active, mode_in_progress=%d\n",
+					pmode->mode.name, ctx->mode_in_progress);
 			}
 		}
 
