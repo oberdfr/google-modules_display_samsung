@@ -289,6 +289,15 @@ struct exynos_panel_funcs {
 	void (*set_acl_mode)(struct exynos_panel *exynos_panel, enum exynos_acl_mode mode);
 
 	/**
+	 * @set_ssc_mode:
+	 *
+	 * This callback is used to implement panel specific logic for ssc mode
+	 * enablement. If this is not defined, it means that panel does not
+	 * support ssc.
+	 */
+	void (*set_ssc_mode)(struct exynos_panel *exynos_panel, bool on);
+
+	/**
 	 * @set_power:
 	 *
 	 * This callback is used to implement panel specific power on/off sequence.
@@ -511,6 +520,13 @@ struct exynos_panel_funcs {
 	 * This callback is used to do something before updating FFC for panel.
 	 */
 	void (*pre_update_ffc)(struct exynos_panel *exynos_panel);
+
+	/**
+	 * @get_pwr_vreg:
+	 *
+	 * This callback is used to get panel power Vreg settings.
+	 */
+	void (*get_pwr_vreg)(struct exynos_panel *exynos_panel, char *buf, size_t len);
 };
 
 /**
@@ -606,6 +622,8 @@ struct exynos_panel_desc {
 	 *    - if `freq set` is changed when lhbm is on, lhbm may not work normally.
 	 */
 	bool no_lhbm_rr_constraints;
+	/* schedule sysfs_notify in workq */
+	bool use_async_notify;
 	const u32 lhbm_post_cmd_delay_frames;
 	const u32 lhbm_effective_delay_frames;
 	/**
@@ -757,6 +775,7 @@ struct exynos_panel {
 
 	enum exynos_hbm_mode hbm_mode;
 	bool dimming_on;
+	bool ssc_mode;
 	/* indicates the LCD backlight is controlled by DCS */
 	bool bl_ctrl_dcs;
 	enum exynos_cabc_mode cabc_mode;
@@ -784,6 +803,10 @@ struct exynos_panel {
 	ktime_t last_self_refresh_active_ts;
 	ktime_t last_panel_idle_set_ts;
 	struct delayed_work idle_work;
+
+	/* works of sysfs_notify */
+	struct work_struct state_notify;
+	struct work_struct brightness_notify;
 
 	/**
 	 * Record the last refresh rate switch. Note the mode switch doesn't
@@ -839,6 +862,8 @@ struct exynos_panel {
 	enum mode_progress_type mode_in_progress;
 	/* indicates BTS raise due to op_hz switch */
 	bool boosted_for_op_hz;
+	/* indicated whether ATC needs to be enabled */
+	bool atc_need_enabled;
 	/* current MIPI DSI HS clock (frequency) */
 	u32 dsi_hs_clk;
 };
