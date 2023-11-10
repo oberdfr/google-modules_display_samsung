@@ -360,7 +360,6 @@ static int exynos_add_relevant_connectors(struct drm_atomic_state *state)
 	struct drm_connector *connector;
 	struct drm_connector_state *conn_state;
 	struct drm_connector_list_iter conn_iter;
-	const struct exynos_drm_connector *exynos_connector;
 	u32 connector_mask = 0;
 	int ret = 0;
 	int i;
@@ -377,18 +376,37 @@ static int exynos_add_relevant_connectors(struct drm_atomic_state *state)
 		if (!(connector_mask & drm_connector_mask(connector)))
 			continue;
 
-		if (!is_exynos_drm_connector(connector))
-			continue;
+		if (is_exynos_drm_connector(connector)) {
+			const struct exynos_drm_connector *exynos_connector =
+					to_exynos_connector(connector);
 
-		exynos_connector = to_exynos_connector(connector);
-		if (!exynos_connector->needs_commit)
-			continue;
+			if (!exynos_connector->needs_commit)
+				continue;
 
-		conn_state = drm_atomic_get_connector_state(state, connector);
-		if (IS_ERR(conn_state)) {
-			ret = PTR_ERR(conn_state);
-			break;
+			conn_state = drm_atomic_get_connector_state(state, connector);
+			if (IS_ERR(conn_state)) {
+				ret = PTR_ERR(conn_state);
+				break;
+			}
 		}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+		else if (is_gs_drm_connector(connector)) {
+			const struct gs_drm_connector *gs_connector =
+					to_gs_connector(connector);
+
+			if (!gs_connector->needs_commit)
+				continue;
+
+			conn_state = drm_atomic_get_connector_state(state, connector);
+			if (IS_ERR(conn_state)) {
+				ret = PTR_ERR(conn_state);
+				break;
+			}
+		}
+#endif
+		else
+			continue;
+
 	}
 	drm_connector_list_iter_end(&conn_iter);
 
