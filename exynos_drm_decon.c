@@ -1478,12 +1478,14 @@ ret:
 		struct drm_atomic_state *state = old_crtc_state->state;
 		struct drm_connector_state *conn_state =
 			crtc_get_connector_state(state, crtc_state);
+		unsigned int te_period_us = DIV_ROUND_UP(MSEC_PER_SEC, te_freq) * USEC_PER_MSEC;
 		unsigned int delay_us = decon->config.dsc.delay_reg_init_us;
 		unsigned int extra_delay_us =
-			DIV_ROUND_UP(MSEC_PER_SEC, te_freq) * MSEC_PER_SEC - delay_us;
+			te_period_us <= delay_us ? 0 : te_period_us - delay_us;
 
 		decon_wait_for_te(decon, te_freq);
-		usleep_range(extra_delay_us, extra_delay_us + 100);
+		if (extra_delay_us > 0)
+			usleep_range(extra_delay_us, extra_delay_us + 100);
 
 		/* remove the delay */
 		if (is_exynos_drm_connector(conn_state->connector)) {
