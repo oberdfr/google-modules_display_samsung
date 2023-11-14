@@ -344,7 +344,6 @@ update_dsi_config_from_exynos_connector(struct decon_config *config,
 		config->dsc.slice_width =
 			DIV_ROUND_UP(config->image_width, config->dsc.slice_count);
 		config->dsc.cfg = exynos_mode->dsc.cfg;
-		config->dsc.delay_reg_init_us = exynos_mode->dsc.delay_reg_init_us;
 	}
 
 	is_vid_mode = (exynos_mode->mode_flags & MIPI_DSI_MODE_VIDEO) != 0;
@@ -377,7 +376,6 @@ static void update_dsi_config_from_gs_connector(struct decon_config *config,
 		config->dsc.slice_width = DIV_ROUND_UP(config->image_width,
 						       config->dsc.slice_count);
 		config->dsc.cfg = gs_mode->dsc.cfg;
-		config->dsc.delay_reg_init_us = gs_mode->dsc.delay_reg_init_us;
 	}
 
 	is_vid_mode = (gs_mode->mode_flags & MIPI_DSI_MODE_VIDEO) != 0;
@@ -1374,28 +1372,12 @@ static void decon_exit_hibernation(struct decon_device *decon)
 	DPU_EVENT_LOG(DPU_EVT_EXIT_HIBERNATION_OUT, decon->id, NULL);
 }
 
-static void decon_wait_for_te(struct decon_device *decon, int te_freq)
-{
-	unsigned int te_period_ms = DIV_ROUND_UP(MSEC_PER_SEC, te_freq);
-
-	reinit_completion(&decon->te_rising);
-
-	DPU_ATRACE_BEGIN(__func__);
-
-	/* Wait for next TE rising or one TE period */
-	if (!wait_for_completion_timeout(&decon->te_rising, te_period_ms))
-		decon_debug(decon, "%s: exceed 1 TE period for TE %dhz\n", __func__, te_freq);
-
-	DPU_ATRACE_END(__func__);
-}
-
 static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_state *old_crtc_state)
 {
 	const struct drm_crtc_state *crtc_state = exynos_crtc->base.state;
 	struct exynos_drm_crtc_state *old_exynos_crtc_state = to_exynos_crtc_state(old_crtc_state);
 	struct decon_device *decon = exynos_crtc->ctx;
 	int vrefresh = drm_mode_vrefresh(&old_crtc_state->mode);
-	int te_freq = exynos_drm_mode_te_freq(&old_crtc_state->mode);
 	unsigned long flags;
 
 	if (decon->state == DECON_STATE_ON) {
@@ -1474,39 +1456,6 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 	decon_info(decon, "%s -\n", __func__);
 
 ret:
-	if (decon->config.dsc.enabled && decon->config.dsc.delay_reg_init_us) {
-		struct drm_atomic_state *state = old_crtc_state->state;
-		struct drm_connector_state *conn_state =
-			crtc_get_connector_state(state, crtc_state);
-		unsigned int te_period_us = DIV_ROUND_UP(MSEC_PER_SEC, te_freq) * USEC_PER_MSEC;
-		unsigned int delay_us = decon->config.dsc.delay_reg_init_us;
-		unsigned int extra_delay_us =
-			te_period_us <= delay_us ? 0 : te_period_us - delay_us;
-
-		decon_wait_for_te(decon, te_freq);
-		if (extra_delay_us > 0)
-			usleep_range(extra_delay_us, extra_delay_us + 100);
-
-		/* remove the delay */
-		if (is_exynos_drm_connector(conn_state->connector)) {
-			struct exynos_display_mode *exynos_mode =
-				&to_exynos_connector_state(conn_state)->exynos_mode;
-
-			exynos_mode->dsc.delay_reg_init_us = 0;
-		}
-#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
-		else if (is_gs_drm_connector(conn_state->connector)) {
-			struct gs_display_mode *gs_mode =
-				&to_gs_connector_state(conn_state)->gs_mode;
-
-			gs_mode->dsc.delay_reg_init_us = 0;
-		}
-#endif
-		decon->config.dsc.delay_reg_init_us = 0;
-
-		decon_dsc_reg_init(decon->id, &decon->config, 0, 0);
-	}
-
 	/* drop extra vote taken to avoid power disable during bypass mode */
 	if (old_exynos_crtc_state->bypass) {
 		decon_debug(decon, "bypass mode: drop extra power ref\n");
@@ -2226,9 +2175,6 @@ static irqreturn_t decon_te_irq_handler(int irq, void *dev_id)
 	}
 	DPU_EVENT_LOG(DPU_EVT_TE_INTERRUPT, decon->id, NULL);
 
-	if (decon->config.dsc.delay_reg_init_us)
-		complete_all(&decon->te_rising);
-
 	if (decon->config.mode.op_mode == DECON_COMMAND_MODE)
 		drm_crtc_handle_vblank(&decon->crtc->base);
 
@@ -2415,7 +2361,6 @@ static int decon_probe(struct platform_device *pdev)
 
 	spin_lock_init(&decon->slock);
 	init_waitqueue_head(&decon->framedone_wait);
-	init_completion(&decon->te_rising);
 
 	ret = decon_init_resources(decon);
 	if (ret)

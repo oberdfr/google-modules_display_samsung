@@ -651,7 +651,6 @@ struct exynos_panel_desc {
 	 * while exiting from AoD mode. Default 0 means no such constraint.
 	 */
 	const u32 lhbm_on_delay_frames;
-	const unsigned int delay_dsc_reg_init_us;
 	const struct brightness_capability *brt_capability;
 	const u32 *bl_range;
 	u32 bl_num_ranges;

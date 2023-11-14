@@ -3938,15 +3938,7 @@ static void exynos_panel_bridge_disable(struct drm_bridge *bridge,
 			/* blanked mode takes precedence over normal modeset */
 			ctx->panel_state = PANEL_STATE_BLANK;
 		} else if (crtc_state && crtc_state->mode_changed &&
-		    drm_atomic_crtc_effectively_active(crtc_state)) {
-			if (ctx->desc->delay_dsc_reg_init_us) {
-				struct exynos_display_mode *exynos_mode =
-							&exynos_conn_state->exynos_mode;
-
-				exynos_mode->dsc.delay_reg_init_us =
-							ctx->desc->delay_dsc_reg_init_us;
-			}
-
+			   drm_atomic_crtc_effectively_active(crtc_state)) {
 			ctx->panel_state = PANEL_STATE_MODESET;
 		} else if (ctx->force_power_on) {
 			/* force blank state instead of power off */
