@@ -1435,7 +1435,7 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 		 */
 		if (decon->config.out_type & DECON_OUT_DP) {
 			const struct drm_connector_state *drm_conn_state =
-				crtc_get_drm_connector_state(state, crtc_state);
+				crtc_get_connector_state(state, crtc_state);
 
 			if (drm_conn_state) {
 				decon_info(decon, "drm_conn_state->max_bpc = %u\n",
