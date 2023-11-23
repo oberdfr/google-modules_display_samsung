@@ -53,7 +53,7 @@ enum hotplug_state {
 };
 
 struct dp_link {
-	u32  link_rate;
+	int  link_rate;
 	u8   num_lanes;
 	u8   support_tps;
 	bool fast_training;
@@ -62,7 +62,7 @@ struct dp_link {
 };
 
 struct dp_host {
-	u32  link_rate;
+	int  link_rate;
 	u8   num_lanes;
 	u8   max_bpc;
 	u8   support_tps;
@@ -82,7 +82,7 @@ struct dp_host {
 #define SINK_NAME_LEN	14	/* monitor name */
 struct dp_sink {
 	u8   revision;
-	u32  link_rate;
+	int  link_rate;
 	u8   num_lanes;
 	u8   support_tps;
 	bool fast_training;
@@ -205,6 +205,8 @@ struct dp_device {
 	bool dp_link_crc_enabled;
 	struct dentry *dp_crc_enabled_debugfs_file;
 	struct dentry *dp_crc_values_debugfs_file;
+
+	bool hdcp_and_audio_enabled;
 };
 
 static inline struct dp_device *get_dp_drvdata(void)
@@ -217,7 +219,12 @@ static inline struct dp_device *get_dp_drvdata(void)
 int dp_audio_config(struct dp_audio_config *audio_config);
 
 /* HDCP 2.2 Prototype */
-void dp_hdcp22_enable(u32 en);
+
+/* Used to update the current authentication status through uevent.
+ * pass in either DRM_MODE_CONTENT_PROTECTION_ENABLED or
+ * DRM_MODE_CONTENT_PROTECTION_DESIRED */
+void dp_hdcp_update_cp(u32 drm_cp_status);
+
 int  dp_dpcd_read_for_hdcp22(u32 address, u32 length, u8 *data);
 int  dp_dpcd_write_for_hdcp22(u32 address, u32 length, u8 *data);
 

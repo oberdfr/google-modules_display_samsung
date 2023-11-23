@@ -20,6 +20,7 @@
 #include <linux/hdmi.h>
 #include <video/videomode.h>
 
+#include <drm/drm_hdcp.h>
 #include <drm/drm_modes.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_atomic_state_helper.h>
@@ -99,9 +100,25 @@ static void dp_init_info(struct dp_device *dp)
 	dp->dp_link_crc_enabled = false;
 }
 
-static u32 dp_get_max_link_rate(struct dp_device *dp)
+static int dp_get_max_link_rate(struct dp_device *dp)
 {
-	return min(dp->host.link_rate, dp->sink.link_rate);
+	/*
+	 * When the host is limited in software to RBR and
+	 * the sink supports only max 2 lanes, it leads to
+	 * best-case link of RBR/2 lanes. Such link cannot
+	 * support 1920x1080@60 video resolution, which is
+	 * not an optimal experience.
+	 *
+	 * For max 2-lane devices, such as USB 3.0 hubs,
+	 * let's bump the link speed to HBR, so we can get
+	 * HBR/2 lanes link for 1920x1080@60 support.
+	 */
+	if (dp->host.link_rate == drm_dp_bw_code_to_link_rate(DP_LINK_BW_1_62) &&
+	    dp->sink.num_lanes < 4) {
+		return min(drm_dp_bw_code_to_link_rate(DP_LINK_BW_2_7), dp->sink.link_rate);
+	} else {
+		return min(dp->host.link_rate, dp->sink.link_rate);
+	}
 }
 
 static u8 dp_get_max_num_lanes(struct dp_device *dp)
@@ -559,8 +576,8 @@ static bool dp_do_link_training_cr(struct dp_device *dp, u32 interval_us)
 	u8 fail_counter_short = 0, fail_counter_long = 0;
 	int i;
 
-	dp_info(dp, "Link Training CR Phase with BW(%u) and Lanes(%u)\n",
-		dp->link.link_rate, dp->link.num_lanes);
+	dp_info(dp, "Link Training CR Phase with Rate(%d) and Lanes(%u)\n",
+		dp->link.link_rate / 100, dp->link.num_lanes);
 
 	for (i = 0; i < MAX_LANE_CNT; i++) {
 		vol_swing_level[i] = 0;
@@ -634,8 +651,8 @@ static bool dp_do_link_training_cr(struct dp_device *dp, u32 interval_us)
 	} while (fail_counter_short < 5 && fail_counter_long < 10);
 
 err:
-	dp_err(dp, "failed Link Training CR phase with BW(%u) and Lanes(%u)\n",
-	       dp->link.link_rate, dp->link.num_lanes);
+	dp_err(dp, "failed Link Training CR phase with Rate(%d) and Lanes(%u)\n",
+	       dp->link.link_rate / 100, dp->link.num_lanes);
 	return false;
 }
 
@@ -677,8 +694,8 @@ static bool dp_do_link_training_eq(struct dp_device *dp, u32 interval_us,
 	u8 fail_counter = 0;
 	int i;
 
-	dp_info(dp, "Link Training EQ Phase with BW(%u) and Lanes(%u)\n",
-		dp->link.link_rate, dp->link.num_lanes);
+	dp_info(dp, "Link Training EQ Phase with Rate(%d) and Lanes(%u)\n",
+		dp->link.link_rate / 100, dp->link.num_lanes);
 
 	dp_init_link_training_eq(dp, tps);
 
@@ -721,8 +738,8 @@ static bool dp_do_link_training_eq(struct dp_device *dp, u32 interval_us,
 	} while (fail_counter < 6);
 
 err:
-	dp_err(dp, "failed Link Training EQ phase with BW(%u) and Lanes(%u)\n",
-	       dp->link.link_rate, dp->link.num_lanes);
+	dp_err(dp, "failed Link Training EQ phase with Rate(%d) and Lanes(%u)\n",
+	       dp->link.link_rate / 100, dp->link.num_lanes);
 	return false;
 }
 
@@ -754,8 +771,8 @@ static int dp_do_full_link_training(struct dp_device *dp, u32 interval_us)
 				dp_get_lower_link_rate(&dp->link);
 
 				dp_info(dp,
-					"reducing link rate to %u during CR phase\n",
-					dp->link.link_rate);
+					"reducing link rate to %d during CR phase\n",
+					dp->link.link_rate / 100);
 				continue;
 			} else if (dp->link.num_lanes > 1) {
 				dp->link.num_lanes >>= 1;
@@ -778,8 +795,8 @@ static int dp_do_full_link_training(struct dp_device *dp, u32 interval_us)
 				dp_get_lower_link_rate(&dp->link);
 
 				dp_info(dp,
-					"reducing link rate to %u during EQ phase\n",
-					dp->link.link_rate);
+					"reducing link rate to %d during EQ phase\n",
+					dp->link.link_rate / 100);
 				continue;
 			} else if (dp->link.num_lanes > 1) {
 				dp->link.num_lanes >>= 1;
@@ -798,7 +815,7 @@ static int dp_do_full_link_training(struct dp_device *dp, u32 interval_us)
 		training_done = true;
 	} while (!training_done);
 
-	dp_info(dp, "DP Link: training done: Rate(%u Mbps) and Lanes(%u)\n",
+	dp_info(dp, "DP Link: training done: Rate(%d Mbps) and Lanes(%u)\n",
 		dp->link.link_rate / 100, dp->link.num_lanes);
 
 	dp_hw_set_training_pattern(NORMAL_DATA);
@@ -858,7 +875,7 @@ static int dp_link_up(struct dp_device *dp)
 
 	/* Fill Sink Capabilities */
 	dp_fill_sink_caps(dp, dpcd);
-	dp_info(dp, "DP Sink: DPCD_Rev_%X, Rate(%u Mbps), Lanes(%u)\n",
+	dp_info(dp, "DP Sink: DPCD_Rev_%X, Rate(%d Mbps), Lanes(%u)\n",
 		dp->sink.revision, dp->sink.link_rate / 100,
 		dp->sink.num_lanes);
 
@@ -937,8 +954,8 @@ static int dp_link_up(struct dp_device *dp)
 	dp->link.ssc = dp_get_ssc(dp);
 	dp->link.support_tps = dp_get_supported_pattern(dp);
 	dp->link.fast_training = dp_get_fast_training(dp);
-	dp_info(dp, "DP Link: training start: Rate(%u Mbps) and Lanes(%u)\n",
-		dp->link.link_rate / 100, dp->link.num_lanes);
+	dp_info(dp, "DP Link: training start: Rate(%d Mbps) Lanes(%u) SSC(%d)\n",
+		dp->link.link_rate / 100, dp->link.num_lanes, dp->link.ssc);
 
 	/* Link Training */
 	interval = dpcd[DP_TRAINING_AUX_RD_INTERVAL] & DP_TRAINING_AUX_RD_MASK;
@@ -1162,6 +1179,11 @@ static void dp_disable(struct drm_encoder *encoder)
 {
 	struct dp_device *dp = encoder_to_dp(encoder);
 
+	if (!pm_runtime_get_if_in_use(dp->dev)) {
+		dp_debug(dp, "%s: DP is already disabled\n", __func__);
+		return;
+	}
+
 	mutex_lock(&dp->cmd_lock);
 
 	if (dp->state == DP_STATE_RUN) {
@@ -1180,6 +1202,7 @@ static void dp_disable(struct drm_encoder *encoder)
 		dp_info(dp, "%s: DP State is not RUN\n", __func__);
 
 	mutex_unlock(&dp->cmd_lock);
+	pm_runtime_put(dp->dev);
 }
 
 // For BIST
@@ -1329,18 +1352,16 @@ static void dp_on_by_hpd_plug(struct dp_device *dp)
 	dp_info(dp, "%s: DP State changed to ON\n", __func__);
 
 	if (dp->bist_mode == DP_BIST_OFF) {
-		hdcp_dplink_connect_state(DP_CONNECT);
-
+		/*
+		 * Notify userspace only about DP video path here.
+		 * Once the DP connection usage has been confirmed,
+		 * then enable HDCP and DP audio in dp_conn_atomic_check.
+		 */
 		if (dev) {
 			connector->status = connector_status_connected;
 			dp_info(dp,
 				"call drm_kms_helper_hotplug_event (connected)\n");
 			drm_kms_helper_hotplug_event(dev);
-		}
-
-		if (dp->sink.has_pcm_audio) {
-			dp_info(dp, "call DP audio notifier (connected)\n");
-			blocking_notifier_call_chain(&dp_ado_notifier_head, 1UL, NULL);
 		}
 	} else {
 		/* BIST mode */
@@ -1420,6 +1441,8 @@ static void dp_off_by_hpd_plug(struct dp_device *dp)
 				dp_info(dp, "call DP audio notifier (disconnected)\n");
 				blocking_notifier_call_chain(&dp_ado_notifier_head, -1UL, NULL);
 			}
+
+			dp->hdcp_and_audio_enabled = false;
 
 			/* Wait Audio is stopped if Audio is working. */
 			if (dp_get_audio_state(dp) != DP_AUDIO_DISABLE) {
@@ -1657,6 +1680,11 @@ static void dp_work_hpd(struct work_struct *work)
 			dp_on_by_hpd_plug(dp);
 		}
 	} else if (dp_get_hpd_state(dp) == EXYNOS_HPD_UNPLUG) {
+		if (!pm_runtime_get_if_in_use(dp->dev)) {
+			mutex_unlock(&dp->hpd_lock);
+			return;
+		}
+
 		if (dp->sink_count > 0) {
 			dp_off_by_hpd_plug(dp);
 			dp_link_down(dp);
@@ -1666,6 +1694,8 @@ static void dp_work_hpd(struct work_struct *work)
 		dp_hw_deinit(&dp->hw_config);
 		dp_disable_dposc(dp);
 
+		pm_runtime_put(dp->dev);
+		/* put runtime power obtained during HPD_PLUG */
 		pm_runtime_put_sync(dp->dev);
 		dp_debug(dp, "pm_rtm_put_sync usage_cnt(%d)\n",
 			 atomic_read(&dp->dev->power.usage_count));
@@ -1717,13 +1747,24 @@ static void dp_work_hpd_irq(struct work_struct *work)
 	u8 irq = 0, irq2 = 0, irq3 = 0;
 	u8 link_status[DP_LINK_STATUS_SIZE];
 
+	if (!pm_runtime_get_if_in_use(dp->dev)) {
+		dp_debug(dp, "[HPD IRQ] IRQ work skipped as power is off\n");
+		return;
+	}
+
+	mutex_lock(&dp->hpd_lock);
+
 	if (sysfs_triggered_irq != 0) {
 		irq = sysfs_triggered_irq;
 		sysfs_triggered_irq = 0;
 		goto process_irq;
 	}
 
-	if (dp->sink.revision < DP_DPCD_REV_12) {
+	if (dp->sink.revision <= DP_DPCD_REV_12) {
+		/*
+		 * Some DPCD 1.2 sinks/hubs haven't properly implemented the IRQ ESI registers.
+		 * Thus, we will force all DPCD 1.2 sinks/hubs to use the legacy IRQ registers.
+		 */
 		sink_count = drm_dp_read_sink_count(&dp->dp_aux);
 		dp_info(dp, "[HPD IRQ] sink count = %u\n", sink_count);
 
@@ -1772,17 +1813,18 @@ static void dp_work_hpd_irq(struct work_struct *work)
 		    (dp->sink_count != sink_count)) {
 			dp_info(dp, "[HPD IRQ] DP downstream port status change\n");
 			dp_downstream_port_event_handler(dp, sink_count);
-			return;
+			goto release_irq_resource;
 		}
 
-		if (sink_count == 0)
-			return;
+		if (sink_count == 0) {
+			goto release_irq_resource;
+		}
 	}
 
 	if (!drm_dp_channel_eq_ok(link_status, dp->link.num_lanes)) {
 		dp_info(dp, "[HPD IRQ] DP link is down, re-establish the link\n");
 		dp_link_down_event_handler(dp);
-		return;
+		goto release_irq_resource;
 	}
 
 process_irq:
@@ -1797,6 +1839,10 @@ process_irq:
 		dp_link_down_event_handler(dp);
 	} else
 		dp_info(dp, "[HPD IRQ] unknown IRQ (0x%X)\n", irq);
+
+release_irq_resource:
+	mutex_unlock(&dp->hpd_lock);
+	pm_runtime_put(dp->dev);
 }
 
 /* Type-C Handshaking Functions */
@@ -1957,27 +2003,28 @@ int dp_audio_config(struct dp_audio_config *audio_config)
 EXPORT_SYMBOL(dp_audio_config);
 
 /* HDCP Driver Handshaking Functions */
-void dp_hdcp22_enable(u32 en)
+void dp_hdcp_update_cp(u32 drm_cp_status)
 {
-	dp_hw_set_hdcp22_function(en);
-	dp_hw_set_hdcp22_encryption(en);
+	struct dp_device *dp = get_dp_drvdata();
+	struct drm_connector *connector = &dp->connector;
+
+	dp_info(dp, "dp_hdcp_update_cp to %d\n", drm_cp_status);
+
+	drm_modeset_lock(&connector->dev->mode_config.connection_mutex, NULL);
+	drm_hdcp_update_content_protection(connector, drm_cp_status);
+	drm_modeset_unlock(&connector->dev->mode_config.connection_mutex);
 }
-EXPORT_SYMBOL(dp_hdcp22_enable);
+EXPORT_SYMBOL(dp_hdcp_update_cp);
 
 int dp_dpcd_read_for_hdcp22(u32 address, u32 length, u8 *data)
 {
 	struct dp_device *dp = get_dp_drvdata();
-	int ret;
+	int ret = -EFAULT;
 
-	mutex_lock(&dp->hpd_lock);
-	pm_runtime_get_sync(dp->dev);
-	if (dp_get_hpd_state(dp) == EXYNOS_HPD_PLUG) {
+	if (pm_runtime_get_if_in_use(dp->dev)) {
 		ret = drm_dp_dpcd_read(&dp->dp_aux, address, data, length);
-	} else {
-		ret = -EFAULT;
+		pm_runtime_put(dp->dev);
 	}
-	pm_runtime_put_sync(dp->dev);
-	mutex_unlock(&dp->hpd_lock);
 
 	if (ret == length)
 		return 0;
@@ -1990,17 +2037,12 @@ EXPORT_SYMBOL(dp_dpcd_read_for_hdcp22);
 int dp_dpcd_write_for_hdcp22(u32 address, u32 length, u8 *data)
 {
 	struct dp_device *dp = get_dp_drvdata();
-	int ret;
+	int ret = -EFAULT;
 
-	mutex_lock(&dp->hpd_lock);
-	pm_runtime_get_sync(dp->dev);
-	if (dp_get_hpd_state(dp) == EXYNOS_HPD_PLUG) {
+	if (pm_runtime_get_if_in_use(dp->dev)) {
 		ret = drm_dp_dpcd_write(&dp->dp_aux, address, data, length);
-	} else {
-		ret = -EFAULT;
+		pm_runtime_put(dp->dev);
 	}
-	pm_runtime_put_sync(dp->dev);
-	mutex_unlock(&dp->hpd_lock);
 
 	if (ret == length)
 		return 0;
@@ -2259,10 +2301,38 @@ static enum drm_mode_status dp_conn_mode_valid(struct drm_connector *connector, 
 	return MODE_OK;
 }
 
+static int dp_conn_atomic_check(struct drm_connector *c, struct drm_atomic_state *state)
+{
+	struct dp_device *dp = connector_to_dp(c);
+
+	dp_debug(dp, "%s: c->status=%d dp->state=%d c->dpms=%d dp->hdcp_and_audio_enabled=%d\n",
+		 __func__, c->status, dp->state, c->dpms, dp->hdcp_and_audio_enabled);
+
+	if (c->status == connector_status_connected && dp->state == DP_STATE_RUN &&
+	    c->dpms == DRM_MODE_DPMS_ON && !dp->hdcp_and_audio_enabled) {
+		/*
+		 * Connector has transitioned to DRM_MODE_DPMS_ON.
+		 * This means DP connection usage has been confirmed.
+		 * Enable HDCP and DP audio.
+		 */
+		hdcp_dplink_connect_state(DP_CONNECT);
+
+		if (dp->sink.has_pcm_audio) {
+			dp_info(dp, "call DP audio notifier (connected)\n");
+			blocking_notifier_call_chain(&dp_ado_notifier_head, 1UL, NULL);
+		}
+
+		dp->hdcp_and_audio_enabled = true;
+	}
+
+	return 0;
+}
+
 static const struct drm_connector_helper_funcs dp_connector_helper_funcs = {
 	.detect_ctx = dp_detect,
 	.get_modes = dp_get_modes,
 	.mode_valid = dp_conn_mode_valid,
+	.atomic_check = dp_conn_atomic_check,
 };
 
 /* DP DRM Component Functions */
@@ -2282,6 +2352,7 @@ static int dp_create_connector(struct drm_encoder *encoder)
 	}
 
 	connector->status = connector_status_disconnected;
+	connector->dpms = DRM_MODE_DPMS_OFF;
 	drm_connector_helper_add(connector, &dp_connector_helper_funcs);
 	drm_connector_register(connector);
 	drm_connector_attach_encoder(connector, encoder);
@@ -2334,6 +2405,8 @@ static int dp_bind(struct device *dev, struct device *master, void *data)
 
 	drm_atomic_helper_connector_reset(&dp->connector);
 	drm_connector_attach_max_bpc_property(&dp->connector, 6, dp->host.max_bpc);
+	drm_connector_attach_content_protection_property(&dp->connector,
+		DRM_MODE_HDCP_CONTENT_TYPE0);
 
 	dp_info(dp, "DP Driver has been binded\n");
 
@@ -2699,7 +2772,7 @@ static int dp_probe(struct platform_device *pdev)
 	pm_runtime_enable(dev);
 
 	/* Register callback to HDCP */
-	dp_register_func_for_hdcp22(dp_hdcp22_enable, dp_dpcd_read_for_hdcp22,
+	dp_register_func_for_hdcp22(dp_hdcp_update_cp, dp_dpcd_read_for_hdcp22,
 		dp_dpcd_write_for_hdcp22);
 
 	dp_info(dp, "DP Driver has been probed.\n");
