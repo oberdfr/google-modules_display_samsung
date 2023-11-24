@@ -20,7 +20,7 @@
 #include <linux/hdmi.h>
 #include <video/videomode.h>
 
-#include <drm/drm_hdcp.h>
+#include <drm/display/drm_hdcp_helper.h>
 #include <drm/drm_modes.h>
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_atomic_state_helper.h>
