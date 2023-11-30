@@ -1512,7 +1512,7 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 		/* If using gs_drm_connector, only need to change name;
 		 * panel detection and name comparison happens in connector
 		 */
-		gs_connector_set_panel_name(pname, cmp_len);
+		gs_connector_set_panel_name(pname, strnlen(pname, PANEL_DRV_LEN));
 		return 0;
 	}
 	/* implied else case: search for legacy panel below */
