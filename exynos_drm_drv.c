@@ -295,7 +295,7 @@ static void exynos_atomic_prepare_partial_update(struct drm_atomic_state *state)
 
 		if (drm_atomic_crtc_needs_modeset(new_crtc_state)) {
 			const struct drm_connector_state *conn_state =
-				crtc_get_connector_state(state, new_crtc_state);
+				crtc_get_phys_connector_state(state, new_crtc_state);
 			if (conn_state && is_exynos_drm_connector(conn_state->connector)) {
 				const struct exynos_display_partial *p =
 					&to_exynos_connector_state(conn_state)->partial;
@@ -756,7 +756,6 @@ int exynos_atomic_enter_tui(void)
 	struct drm_crtc *crtc;
 	u32 tui_crtc_mask = 0;
 	struct exynos_drm_private *private = drm_to_exynos_dev(dev);
-	struct exynos_drm_connector_state *exynos_conn_state;
 
 	pr_debug("%s +\n", __func__);
 
@@ -809,16 +808,9 @@ int exynos_atomic_enter_tui(void)
 		if (ret)
 			goto err;
 
-		conn_state = crtc_get_connector_state(state, crtc_state);
+		conn_state = crtc_get_phys_connector_state(state, crtc_state);
 
-		if (conn_state)
-			exynos_conn_state = to_exynos_connector_state(conn_state);
-		else
-			exynos_conn_state = NULL;
-
-		if (exynos_conn_state) {
-			exynos_conn_state->blanked_mode = true;
-
+		if (conn_state) {
 			if (conn_state->self_refresh_aware) {
 				struct exynos_drm_crtc_state *exynos_crtc_state =
 					to_exynos_crtc_state(crtc_state);
@@ -826,6 +818,21 @@ int exynos_atomic_enter_tui(void)
 				exynos_crtc_state->bypass = true;
 				crtc_state->self_refresh_active = true;
 			}
+
+			if (is_exynos_drm_connector(conn_state->connector)) {
+				struct exynos_drm_connector_state *exynos_conn_state =
+					to_exynos_connector_state(conn_state);
+
+				exynos_conn_state->blanked_mode = true;
+			}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+			else if (is_gs_drm_connector(conn_state->connector)) {
+				struct gs_drm_connector_state *gs_conn_state =
+					to_gs_connector_state(conn_state);
+
+				gs_conn_state->blanked_mode = true;
+			}
+#endif
 		}
 	}
 

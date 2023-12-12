@@ -275,15 +275,30 @@ int exynos_drm_connector_create_properties(struct drm_device *dev);
 struct exynos_drm_connector_properties *
 exynos_drm_connector_get_properties(struct exynos_drm_connector *exynos_conector);
 
+/**
+ * crtc_get_phys_connector_state() - Finds connector state associated with crtc
+ * @state: drm_atomic_state to check for connector states
+ * @crtc_state: crtc_state to check connectors against
+ *
+ * A given crtc_state may be connected to a mixture of physical connectors and
+ * writeback connectors. This function finds the connector_state attached to a
+ * given crtc that is physical (that is, non-writeback).
+ *
+ * Return: drm_connector_state for physical connector attached, or NULL if no
+ *         such connector is present
+ */
 static inline struct drm_connector_state *
-crtc_get_connector_state(const struct drm_atomic_state *state,
-			 const struct drm_crtc_state *crtc_state)
+crtc_get_phys_connector_state(const struct drm_atomic_state *state,
+			      const struct drm_crtc_state *crtc_state)
 {
 	const struct drm_connector *conn;
 	struct drm_connector_state *conn_state;
 	int i;
 
 	for_each_new_connector_in_state(state, conn, conn_state, i) {
+		if (conn->connector_type == DRM_MODE_CONNECTOR_WRITEBACK)
+			continue;
+
 		if (!(crtc_state->connector_mask & drm_connector_mask(conn)))
 			continue;
 

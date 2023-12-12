@@ -556,7 +556,7 @@ static int decon_check_modeset(struct exynos_drm_crtc *exynos_crtc,
 	bool conn_state_seamless_possible, dsc_enabled;
 	unsigned int dsc_count;
 
-	conn_state = crtc_get_connector_state(state, crtc_state);
+	conn_state = crtc_get_phys_connector_state(state, crtc_state);
 	if (!conn_state)
 		return 0;
 
@@ -578,10 +578,8 @@ static int decon_check_modeset(struct exynos_drm_crtc *exynos_crtc,
 		dsc_count = gs_conn_state->gs_mode.dsc.dsc_count;
 	}
 #endif
-	else {
-		pr_warn("%s Unsupported connector type\n", __func__);
+	else
 		return 0;
-	}
 
 	/* only decon0 supports more than 1 dsc */
 	if (decon->id != 0) {
@@ -1245,7 +1243,7 @@ static unsigned int decon_get_vblank_usec(const struct drm_crtc_state *crtc_stat
 					const struct drm_atomic_state *old_state)
 {
 	const struct drm_connector_state *conn_state =
-		crtc_get_connector_state(old_state, crtc_state);
+		crtc_get_phys_connector_state(old_state, crtc_state);
 	if (WARN_ON(!conn_state))
 		return DEFAULT_VBLANK_USEC;
 	if (is_exynos_drm_connector(conn_state->connector)) {
@@ -1456,7 +1454,7 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 	if (crtc_state->mode_changed || crtc_state->connectors_changed) {
 		const struct drm_atomic_state *state = old_crtc_state->state;
 		const struct drm_connector_state *conn_state =
-			crtc_get_connector_state(state, crtc_state);
+			crtc_get_phys_connector_state(state, crtc_state);
 
 		decon_update_config(&decon->config, crtc_state, conn_state);
 		DPU_EVENT_LOG(DPU_EVT_DECON_UPDATE_CONFIG, decon->id, NULL);
@@ -1466,18 +1464,15 @@ static void decon_enable(struct exynos_drm_crtc *exynos_crtc, struct drm_crtc_st
 		 * DECON's OUT_BPC is set by default 8. It needs to update here.
 		 */
 		if (decon->config.out_type & DECON_OUT_DP) {
-			const struct drm_connector_state *drm_conn_state =
-				crtc_get_connector_state(state, crtc_state);
-
-			if (drm_conn_state) {
+			if (conn_state) {
 				decon_info(decon, "drm_conn_state->max_bpc = %u\n",
-					   drm_conn_state->max_bpc);
+					   conn_state->max_bpc);
 
 				/*
 				 * drm_atomic_connector_check() has been called.
 				 * drm_conn_state->max_bpc has the right value for out_bpc.
 				 */
-				decon->config.out_bpc = drm_conn_state->max_bpc;
+				decon->config.out_bpc = conn_state->max_bpc;
 			}
 		}
 

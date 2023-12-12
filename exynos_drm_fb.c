@@ -304,8 +304,8 @@ static void plane_state_to_win_config(struct dpu_bts_win_config *win_config,
 	DRM_DEBUG("simplified rot[0x%x]\n", simplified_rot);
 }
 
-static void conn_state_to_win_config(struct dpu_bts_win_config *win_config,
-				const struct drm_connector_state *conn_state)
+static void wb_conn_state_to_win_config(struct dpu_bts_win_config *win_config,
+					const struct drm_connector_state *conn_state)
 {
 	const struct writeback_device *wb = conn_to_wb_dev(conn_state->connector);
 	const struct drm_framebuffer *fb = conn_state->writeback_job->fb;
@@ -414,7 +414,7 @@ static void exynos_atomic_bts_pre_update(struct drm_device *dev,
 		if (!old_job && new_job && new_conn_state->crtc) {
 			decon = crtc_to_decon(new_conn_state->crtc);
 			win_config = &decon->bts.wb_config;
-			conn_state_to_win_config(win_config, new_conn_state);
+			wb_conn_state_to_win_config(win_config, new_conn_state);
 		} else if (old_job && !new_job && old_conn_state->crtc) {
 			decon = crtc_to_decon(old_conn_state->crtc);
 			win_config = &decon->bts.wb_config;
@@ -817,8 +817,6 @@ static void exynos_atomic_commit_tail(struct drm_atomic_state *old_state)
 						 to_gs_connector_state(new_conn_state));
 		}
 #endif
-		else
-			pr_warn("%s Unsupported connector type\n", __func__);
 	}
 	DPU_ATRACE_END("connector_pre_commit");
 
@@ -866,8 +864,6 @@ static void exynos_atomic_commit_tail(struct drm_atomic_state *old_state)
 					     to_gs_connector_state(new_conn_state));
 		}
 #endif
-		else
-			pr_warn("%s Unsupported connector type\n", __func__);
 	}
 	DPU_ATRACE_END("connector_commit");
 	DPU_ATRACE_BEGIN("wait_for_crtc_flip");
