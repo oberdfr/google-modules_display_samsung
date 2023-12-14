@@ -690,6 +690,8 @@ struct exynos_panel_desc {
 	/* Panel ready timeout */
 	unsigned int rdy_timeout_ms;
 	const u32 default_dsi_hs_clk;
+	/* Set true if need to keep ATC on while switching op_hz if it's already on */
+	const bool keep_atc_on_for_op;
 };
 
 #define PANEL_ID_MAX		40
