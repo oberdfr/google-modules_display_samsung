@@ -165,6 +165,10 @@ enum exynos_acl_mode {
 	ACL_ENHANCED,
 };
 
+enum exynos_panel_notifier_action {
+	EXYNOS_PANEL_NOTIFIER_SET_OP_HZ = 0,
+};
+
 /**
  * struct exynos_panel_mode - panel mode info
  */
@@ -909,6 +913,7 @@ struct exynos_panel {
 	/* use for display stats residence */
 	struct display_stats disp_stats;
 
+	struct blocking_notifier_head notifier_head;
 	/**
 	 * Record the last refresh rate switch. Note the mode switch doesn't
 	 * mean rr switch so it differs from last_mode_set_ts
@@ -1274,6 +1279,9 @@ ssize_t exynos_dsi_cmd_send_flags(struct mipi_dsi_device *dsi, u16 flags);
 
 int exynos_panel_probe(struct mipi_dsi_device *dsi);
 void exynos_panel_remove(struct mipi_dsi_device *dsi);
+
+int exynos_panel_register_notifier(struct drm_connector *connector, struct notifier_block *nb);
+int exynos_panel_unregister_notifier(struct drm_connector *connector, struct notifier_block *nb);
 
 static inline void exynos_dsi_dcs_write_buffer_force_batch_begin(struct mipi_dsi_device *dsi)
 {

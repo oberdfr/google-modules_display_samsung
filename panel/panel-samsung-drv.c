@@ -1834,10 +1834,15 @@ static int exynos_panel_set_op_hz(struct exynos_panel *ctx, unsigned int hz)
 	mutex_lock(&ctx->mode_lock);
 	if (ctx->op_hz != hz) {
 		ret = funcs->set_op_hz(ctx, hz);
-		if (ret)
+		if (ret) {
 			dev_err(ctx->dev, "failed to set op rate: %u Hz\n", hz);
-		else
+		} else {
+			DPU_ATRACE_BEGIN("notify_op_hz");
+			blocking_notifier_call_chain(&ctx->notifier_head,
+						     EXYNOS_PANEL_NOTIFIER_SET_OP_HZ, &ctx->op_hz);
+			DPU_ATRACE_END("notify_op_hz");
 			sysfs_notify(&ctx->dev->kobj, NULL, "op_hz");
+		}
 	} else {
 		dev_dbg(ctx->dev, "%s: skip the same op rate: %u Hz\n", __func__, hz);
 	}
@@ -4386,6 +4391,39 @@ void exynos_panel_wait_for_vsync_done(struct exynos_panel *ctx, u32 te_us, u32 p
 }
 EXPORT_SYMBOL(exynos_panel_wait_for_vsync_done);
 
+int exynos_panel_register_notifier(struct drm_connector *connector, struct notifier_block *nb)
+{
+	int retval;
+
+	if (is_exynos_drm_connector(connector)) {
+		struct exynos_drm_connector *exynos_connector = to_exynos_connector(connector);
+		struct exynos_panel *ctx = exynos_connector_to_panel(exynos_connector);
+
+		retval = blocking_notifier_chain_register(&ctx->notifier_head, nb);
+		if (retval != 0)
+			dev_warn(ctx->dev, "register notifier failed(%d)\n", retval);
+		else
+			blocking_notifier_call_chain(&ctx->notifier_head,
+						     EXYNOS_PANEL_NOTIFIER_SET_OP_HZ, &ctx->op_hz);
+	} else {
+		dev_warn(connector->kdev,
+			 "register notifier failed(unexpected type of connector)\n");
+		retval = -EINVAL;
+	}
+
+	return retval;
+}
+EXPORT_SYMBOL_GPL(exynos_panel_register_notifier);
+
+int exynos_panel_unregister_notifier(struct drm_connector *connector, struct notifier_block *nb)
+{
+	struct exynos_drm_connector *exynos_connector = to_exynos_connector(connector);
+	struct exynos_panel *ctx = exynos_connector_to_panel(exynos_connector);
+
+	return blocking_notifier_chain_unregister(&ctx->notifier_head, nb);
+}
+EXPORT_SYMBOL_GPL(exynos_panel_unregister_notifier);
+
 static u32 get_rr_switch_applied_te_count(struct exynos_panel *ctx)
 {
 	/* New refresh rate should take effect immediately after exiting AOD mode */
@@ -5565,6 +5603,8 @@ int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 		ctx->normal_mode_work_delay_ms = ctx->desc->normal_mode_work_delay_ms;
 		INIT_DELAYED_WORK(&ctx->normal_mode_work, exynos_panel_normal_mode_work);
 	}
+
+	BLOCKING_INIT_NOTIFIER_HEAD(&ctx->notifier_head);
 
 	if (ctx->desc->default_dsi_hs_clk)
 		ctx->dsi_hs_clk = ctx->desc->default_dsi_hs_clk;
