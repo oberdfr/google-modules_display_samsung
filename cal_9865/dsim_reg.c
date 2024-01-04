@@ -1414,6 +1414,14 @@ static void dsim_reg_set_cm_underrun_lp_ref(u32 id, u32 lp_ref)
 	dsim_write(id, DSIM_UNDERRUN_CTRL, val);
 }
 
+static void dsim_reg_set_te_on_cmd_allow(u32 id, u32 en)
+{
+	u32 val = en ? ~0 : 0;
+	u32 mask = DSIM_OPTION_SUITE_OPT_TE_ON_CMD_ALLOW_MASK;
+
+	dsim_write_mask(id, DSIM_OPTION_SUITE, val, mask);
+}
+
 static void dsim_reg_set_threshold(u32 id, u32 threshold)
 {
 	u32 val = DSIM_THRESHOLD_LEVEL(threshold);
@@ -1600,6 +1608,8 @@ static void dsim_reg_set_config(u32 id, struct dsim_reg_config *config,
 		dsim_reg_set_cm_underrun_lp_ref(id,
 				config->cmd_underrun_cnt[idx]);
 	}
+	/* enable TE ON cmd allow for panel init */
+	dsim_reg_set_te_on_cmd_allow(id, true);
 
 	threshold = config->p_timing.hactive;
 	/* threshold is set as 1H. 1H is compressed width in case of DSC */
