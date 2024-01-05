@@ -55,6 +55,16 @@ Description:
 
 		Valid panels are 'primary-panel' or 'secondary-panel'.
 
+What:		/sys/class/backlight/<panel>-backlight/allow_wakeup_by_state_change
+Date:		January 2024
+KernelVersion:	5.15
+Contact:	"Midas Chien" <midaschieh@google.com>
+Description:
+		The file specifies whether the system can be awakened to receive
+		notifications regarding backlight state changes.
+
+		Valid panels are 'panel0' or 'panel1'.
+
 What:		/sys/devices/platform/exynos-drm/<panel>/refresh_ctrl
 Date:		October, 2024
 KernelVersion:	6.1
