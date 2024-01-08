@@ -296,13 +296,17 @@ static inline void dqe_reg_print_atc_he(u32 dqe_id, struct drm_printer *p) {}
 void dqe_reg_set_cgc_en_internal(u32 dqe_id, bool en);
 void dqe_reg_set_cgc_coef_dma_req_internal(u32 dqe_id);
 int dqe_reg_wait_cgc_dma_done_internal(u32 id, unsigned long timeout_us);
-void dqe_cgc_regs_desc_init(void __iomem *regs, phys_addr_t start, const char *name,
-			    enum dqe_version ver, unsigned int dqe_id);
 void dqe_reg_set_rcd_en_internal(u32 id, bool en);
 #else
 static inline void dqe_reg_set_cgc_en_internal(u32 dqe_id, bool en) {return; }
 static inline void dqe_reg_set_cgc_coef_dma_req_internal(u32 dqe_id) {return; }
 static inline int dqe_reg_wait_cgc_dma_done_internal(u32 id, unsigned long timeout_us) {return 0; }
+#endif
+
+#if defined(CONFIG_SOC_ZUMA)
+void dqe_cgc_regs_desc_init(void __iomem *regs, phys_addr_t start, const char *name,
+			    enum dqe_version ver, unsigned int dqe_id);
+#else
 static inline void dqe_cgc_regs_desc_init(void __iomem *regs, phys_addr_t start,
 					  const char *name, enum dqe_version ver,
 					  unsigned int dqe_id) {return; }
