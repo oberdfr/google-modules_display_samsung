@@ -1702,12 +1702,26 @@ static int dsim_attach_bridge(struct dsim_device *dsim)
 	return ret;
 }
 
+static bool is_primary_panel(struct dsim_device *dsim)
+{
+	const char *name;
+
+	if (!dsim->dsi_device) {
+		dsim_info(dsim, "no dsi_device\n");
+		return false;
+	}
+
+	name = dsim->dsi_device->name;
+	return !name || (name[1] != ':') || (name[0] == '0');
+}
+
 static int dsim_bind(struct device *dev, struct device *master, void *data)
 {
 	struct drm_encoder *encoder = dev_get_drvdata(dev);
 	struct dsim_device *dsim = encoder_to_dsim(encoder);
 	struct drm_device *drm_dev = data;
-	int ret = 0;
+	static bool primary_attached;
+	int i, ret = 0;
 
 	dsim_debug(dsim, "%s +\n", __func__);
 
@@ -1733,11 +1747,22 @@ static int dsim_bind(struct device *dev, struct device *master, void *data)
 	if (!encoder->possible_crtcs) {
 		dsim_err(dsim, "failed to get possible crtc, ret = %d\n", ret);
 		drm_encoder_cleanup(encoder);
+		dsim->encoder_initialized = false;
 		return -ENOTSUPP;
 	}
+	dsim->encoder_initialized = true;
 
-	ret = dsim_attach_bridge(dsim);
+	if (primary_attached || is_primary_panel(dsim)) {
+		dsim_attach_bridge(dsim);
+		primary_attached = true;
 
+		for (i = 0; i < MAX_DSI_CNT; i++) {
+			if (dsim_drvdata[i] && (dsim_drvdata[i]->id != dsim->id) &&
+				dsim_drvdata[i]->panel_bridge == NULL &&
+				dsim_drvdata[i]->encoder_initialized)
+				dsim_attach_bridge(dsim_drvdata[i]);
+		}
+	}
 	dsim_debug(dsim, "%s -\n", __func__);
 
 	return ret;

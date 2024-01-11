@@ -75,6 +75,7 @@ struct dsim_device {
 	struct drm_bridge *panel_bridge;
 	struct mipi_dsi_device *dsi_device;
 	struct device_link *dev_link;
+	bool encoder_initialized;
 
 	enum exynos_drm_output_type output_type;
 	int te_from;
