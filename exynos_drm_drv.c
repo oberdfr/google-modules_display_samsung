@@ -767,6 +767,12 @@ int exynos_atomic_enter_tui(void)
 	if (private->tui_enabled)
 		return -EBUSY;
 
+	if (mutex_trylock(&private->dp_tui_lock) == 0) {
+		/* DP connection is active, bail out */
+		pr_info("%s: unable to enter TUI, DP is active\n", __func__);
+		return -EBUSY;
+	}
+
 	drm_for_each_crtc(crtc, dev) {
 		decon = crtc_to_decon(crtc);
 		hibernation_block_exit(decon->hibernation);
@@ -775,8 +781,10 @@ int exynos_atomic_enter_tui(void)
 	DRM_MODESET_LOCK_ALL_BEGIN(dev, ctx, 0, ret);
 
 	state = drm_atomic_helper_duplicate_state(dev, &ctx);
-	if (IS_ERR(state))
+	if (IS_ERR(state)) {
+		ret = -ENOMEM;
 		goto err_dup;
+	}
 
 	mode_config->suspend_state = state;
 
@@ -871,6 +879,8 @@ err_state_alloc:
 		mode_config->suspend_state = NULL;
 	}
 err_dup:
+	if (ret)
+		mutex_unlock(&private->dp_tui_lock);
 	DRM_MODESET_LOCK_ALL_END(dev, ctx, ret);
 	pr_debug("%s -\n", __func__);
 
@@ -935,6 +945,7 @@ int exynos_atomic_exit_tui(void)
 	DRM_MODESET_LOCK_ALL_END(dev, ctx, ret);
 	if (!ret)
 		drm_atomic_state_put(state);
+	mutex_unlock(&private->dp_tui_lock);
 
 	pr_debug("%s -\n", __func__);
 	return ret;
@@ -1097,6 +1108,9 @@ static int exynos_drm_bind(struct device *dev)
 
 	init_waitqueue_head(&private->wait);
 	spin_lock_init(&private->lock);
+
+	private->tui_enabled = false;
+	mutex_init(&private->dp_tui_lock);
 
 	dev_set_drvdata(dev, drm);
 

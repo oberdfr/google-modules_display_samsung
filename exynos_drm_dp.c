@@ -175,9 +175,13 @@ static bool dp_fec = false;
 module_param(dp_fec, bool, 0664);
 MODULE_PARM_DESC(dp_fec, "Enable/disable DP link forward error correction");
 
-static bool dp_ssc = false;
+static bool dp_ssc = true;
 module_param(dp_ssc, bool, 0664);
 MODULE_PARM_DESC(dp_ssc, "Enable/disable DP link spread spectrum clocking");
+
+static bool dp_phy_boost = true;
+module_param(dp_phy_boost, bool, 0664);
+MODULE_PARM_DESC(dp_phy_boost, "Enable/disable DP PHY current boost");
 
 #define DP_BIST_OFF     0
 #define DP_BIST_ON      1
@@ -1695,12 +1699,22 @@ static int dp_downstream_port_event_handler(struct dp_device *dp, int new_sink_c
 static void dp_work_hpd(struct work_struct *work)
 {
 	struct dp_device *dp = get_dp_drvdata();
+	struct drm_connector *connector = &dp->connector;
+	struct drm_device *dev = connector->dev;
+	struct exynos_drm_private *private = drm_to_exynos_dev(dev);
 	enum link_training_status link_status = LINK_TRAINING_UNKNOWN;
 	int ret;
 
 	mutex_lock(&dp->hpd_lock);
 
 	if (dp_get_hpd_state(dp) == EXYNOS_HPD_PLUG) {
+		if (mutex_trylock(&private->dp_tui_lock) == 0) {
+			/* TUI is active, bail out */
+			dp_info(dp, "unable to handle HPD_PLUG, TUI is active\n");
+			mutex_unlock(&dp->hpd_lock);
+			return;
+		}
+
 		pm_runtime_get_sync(dp->dev);
 		dp_debug(dp, "pm_rtm_get_sync usage_cnt(%d)\n",
 			 atomic_read(&dp->dev->power.usage_count));
@@ -1752,6 +1766,8 @@ static void dp_work_hpd(struct work_struct *work)
 
 		dp->state = DP_STATE_INIT;
 		dp_info(dp, "%s: DP State changed to INIT\n", __func__);
+
+		mutex_unlock(&private->dp_tui_lock);
 	}
 
 	mutex_unlock(&dp->hpd_lock);
@@ -1784,6 +1800,7 @@ HPD_FAIL:
 		dp->dp_hotplug_error_code);
 	drm_kms_helper_hotplug_event(dp->connector.dev);
 
+	mutex_unlock(&private->dp_tui_lock);
 	mutex_unlock(&dp->hpd_lock);
 }
 
@@ -1973,7 +1990,7 @@ static int usb_typec_dp_notification_locked(struct dp_device *dp, enum hotplug_s
 			dp->hw_config.pin_type = dp->typec_pin_assignment;
 
 			dp->hw_config.aux_auto_orientation = dp->aux_auto_orientation;
-
+			dp->hw_config.phy_boost = dp_phy_boost;
 			dp_hpd_changed(dp, EXYNOS_HPD_PLUG);
 		}
 	} else if (hpd == EXYNOS_HPD_IRQ) {
