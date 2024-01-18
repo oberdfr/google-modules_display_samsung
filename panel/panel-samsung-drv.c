@@ -548,26 +548,31 @@ static int exynos_panel_wait_ready(struct exynos_panel *ctx)
 int exynos_panel_reset(struct exynos_panel *ctx)
 {
 	int ret;
-	u32 delay;
-	const u32 *timing_ms = ctx->desc->reset_timing_ms;
+	int delay;
+	const int *timing_ms = ctx->desc->reset_timing_ms;
 
 	dev_dbg(ctx->dev, "%s +\n", __func__);
 
 	if (IS_ENABLED(CONFIG_BOARD_EMULATOR) || IS_ERR_OR_NULL(ctx->reset_gpio))
 		return 0;
 
-	gpiod_set_value(ctx->reset_gpio, 1);
 	delay = timing_ms[PANEL_RESET_TIMING_HIGH] ?: 5;
-	delay *= 1000;
-	usleep_range(delay, delay + 10);
+	if (delay > 0) {
+		gpiod_set_value(ctx->reset_gpio, 1);
+		dev_dbg(ctx->dev, "reset=H, delay: %dms\n", delay);
+		delay *= 1000;
+		usleep_range(delay, delay + 10);
+	}
 
 	gpiod_set_value(ctx->reset_gpio, 0);
 	delay = timing_ms[PANEL_RESET_TIMING_LOW] ?: 5;
+	dev_dbg(ctx->dev, "reset=L, delay: %dms\n", delay);
 	delay *= 1000;
 	usleep_range(delay, delay + 10);
 
 	gpiod_set_value(ctx->reset_gpio, 1);
 	delay = timing_ms[PANEL_RESET_TIMING_INIT] ?: 10;
+	dev_dbg(ctx->dev, "reset=H, delay: %dms\n", delay);
 	delay *= 1000;
 	usleep_range(delay, delay + 10);
 
