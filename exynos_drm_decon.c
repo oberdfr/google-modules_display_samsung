@@ -391,8 +391,9 @@ update_dsi_config_from_exynos_connector(struct decon_config *config,
 		config->dsc.dsc_count = exynos_mode->dsc.dsc_count;
 		config->dsc.slice_count = exynos_mode->dsc.slice_count;
 		config->dsc.slice_height = exynos_mode->dsc.slice_height;
-		config->dsc.slice_width =
-			DIV_ROUND_UP(config->image_width, config->dsc.slice_count);
+		config->dsc.slice_width = DIV_ROUND_UP(
+			config->image_width / (config->mode.dsi_mode == DSI_MODE_DUAL_DSI ? 2 : 1),
+			config->dsc.slice_count);
 		config->dsc.cfg = exynos_mode->dsc.cfg;
 		config->dsc.is_scrv4 = exynos_mode->dsc.is_scrv4;
 	}
