@@ -97,6 +97,7 @@ static void histogram_chan_collect_bins_locked(struct exynos_dqe *dqe,
 {
 	DPU_ATRACE_BEGIN(__func__);
 	/* collect data from bins */
+	DPU_EVENT_LOG(DPU_EVT_HIST_COLLECT_BINS, dqe->decon->id, &hist_id);
 	dqe_reg_get_histogram_bins(dqe->dev, dqe->decon->id, hist_id, bins);
 	DPU_ATRACE_END(__func__);
 }

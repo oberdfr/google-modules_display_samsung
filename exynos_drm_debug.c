@@ -331,6 +331,9 @@ void DPU_EVENT_LOG(enum dpu_event_type type, int index, void *priv)
 		memcpy(&log->data.partial.prev, partial_region,
 					sizeof(struct drm_rect));
 		break;
+	case DPU_EVT_HIST_COLLECT_BINS:
+		log->data.hist_info.id = *(enum exynos_histogram_id *) priv;
+		break;
 	case DPU_EVT_DSIM_CRC:
 		log->data.value = decon->d.crc_cnt;
 		break;
@@ -585,6 +588,7 @@ static const char *get_event_name(enum dpu_event_type type)
 		"PARTIAL_PREPARE",
 		"PARTIAL_UPDATE",
 		"PARTIAL_PESTORE",
+		"HIST_COLLECT_BINS",
 		"DSIM_CRC",
 		"DSIM_ECC",
 		"VBLANK_ENABLE",
@@ -915,6 +919,11 @@ static void dpu_event_log_print(const struct decon_device *decon, struct drm_pri
 				log->data.partial.prev.y1,
 				drm_rect_width(&log->data.partial.prev),
 				drm_rect_height(&log->data.partial.prev));
+			break;
+		case DPU_EVT_HIST_COLLECT_BINS:
+			scnprintf(buf + len, sizeof(buf) - len,
+					"\thist_id: %d",
+					log->data.hist_info.id);
 			break;
 		case DPU_EVT_DSIM_CRC:
 			scnprintf(buf + len, sizeof(buf) - len,
