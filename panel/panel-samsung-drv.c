@@ -232,6 +232,7 @@ static void exynos_panel_update_te2(struct exynos_panel *ctx)
 static int exynos_panel_parse_gpios(struct exynos_panel *ctx)
 {
 	struct device *dev = ctx->dev;
+	int ret;
 
 	dev_dbg(ctx->dev, "%s +\n", __func__);
 
@@ -251,7 +252,19 @@ static int exynos_panel_parse_gpios(struct exynos_panel *ctx)
 	if (IS_ERR(ctx->enable_gpio))
 		ctx->enable_gpio = NULL;
 
-	ctx->vddd_gpio = devm_gpiod_get(dev, "vddd", GPIOD_OUT_HIGH);
+	ret = of_property_read_u32(dev->of_node, "vddd_gpio_fixed_level",
+				   &ctx->vddd_gpio_fixed_level);
+	if (ret) {
+		ctx->vddd_gpio_fixed_level = GPIO_LEVEL_UNSPECIFIED;
+	} else if (ctx->vddd_gpio_fixed_level > GPIO_LEVEL_HIGH) {
+		dev_warn(ctx->dev, "ignore vddd_gpio_fixed_level value %u\n",
+			 ctx->vddd_gpio_fixed_level);
+		ctx->vddd_gpio_fixed_level = GPIO_LEVEL_UNSPECIFIED;
+	}
+
+	ctx->vddd_gpio = devm_gpiod_get(
+		dev, "vddd",
+		(ctx->vddd_gpio_fixed_level == GPIO_LEVEL_LOW ? GPIOD_OUT_LOW : GPIOD_OUT_HIGH));
 	if (IS_ERR(ctx->vddd_gpio))
 		ctx->vddd_gpio = NULL;
 
@@ -594,7 +607,12 @@ EXPORT_SYMBOL(exynos_panel_reset);
 static void _exynos_panel_set_vddd_voltage(struct exynos_panel *ctx, bool is_lp)
 {
 	if (!IS_ERR_OR_NULL(ctx->vddd_gpio)) {
-		gpiod_set_value(ctx->vddd_gpio, is_lp ? 0 : 1);
+		bool gpio_level = is_lp ? GPIO_LEVEL_LOW : GPIO_LEVEL_HIGH;
+
+		if (ctx->vddd_gpio_fixed_level != GPIO_LEVEL_UNSPECIFIED)
+			gpio_level = ctx->vddd_gpio_fixed_level;
+		gpiod_set_value(ctx->vddd_gpio, gpio_level);
+		dev_dbg(ctx->dev, "%s: is_lp: %d, vddd_gpio: %d\n", __func__, is_lp, gpio_level);
 	} else {
 		u32 uv = is_lp ? ctx->vddd_lp_uV : ctx->vddd_normal_uV;
 
