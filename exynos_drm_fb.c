@@ -395,14 +395,28 @@ static void exynos_atomic_bts_pre_update(struct drm_device *dev,
 		bool old_job, new_job;
 
 		if (new_conn_state && new_conn_state->crtc) {
-			struct exynos_drm_connector_state *exynos_connector_state =
-				to_exynos_connector_state(new_conn_state);
-			if (exynos_connector_state->update_operation_rate_to_bts) {
-				exynos_connector_state->update_operation_rate_to_bts = false;
-				decon = crtc_to_decon(new_conn_state->crtc);
-				decon_mode_bts_op_rate_update(decon,
-						exynos_connector_state->operation_rate);
+			if (is_exynos_drm_connector(conn)) {
+				struct exynos_drm_connector_state *exynos_connector_state =
+					to_exynos_connector_state(new_conn_state);
+				if (exynos_connector_state->update_operation_rate_to_bts) {
+					exynos_connector_state->update_operation_rate_to_bts = false;
+					decon = crtc_to_decon(new_conn_state->crtc);
+					decon_mode_bts_op_rate_update(decon,
+							exynos_connector_state->operation_rate);
+				}
 			}
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+			else if (is_gs_drm_connector(conn)) {
+				struct gs_drm_connector_state *gs_connector_state =
+					to_gs_connector_state(new_conn_state);
+				if (gs_connector_state->update_operation_rate_to_bts) {
+					gs_connector_state->update_operation_rate_to_bts = false;
+					decon = crtc_to_decon(new_conn_state->crtc);
+					decon_mode_bts_op_rate_update(decon,
+							gs_connector_state->operation_rate);
+				}
+			}
+#endif
 		}
 
 		if (conn->connector_type != DRM_MODE_CONNECTOR_WRITEBACK)
