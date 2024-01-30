@@ -97,6 +97,7 @@ static void histogram_chan_collect_bins_locked(struct exynos_dqe *dqe,
 {
 	DPU_ATRACE_BEGIN(__func__);
 	/* collect data from bins */
+	DPU_EVENT_LOG(DPU_EVT_HIST_COLLECT_BINS, dqe->decon->id, &hist_id);
 	dqe_reg_get_histogram_bins(dqe->dev, dqe->decon->id, hist_id, bins);
 	DPU_ATRACE_END(__func__);
 }
@@ -236,7 +237,7 @@ int histogram_channel_request_ioctl(struct drm_device *dev, void *data, struct d
 		histogram_chan_collect_bins_locked(dqe, hist_id, &hist_chan->bins);
 		memcpy(&e->event.bins, &hist_chan->bins, sizeof(e->event.bins));
 #else
-		histogram_chan_collect_bins_locked(dqe, hist_id, &dqe->state.event->event.bins);
+		histogram_chan_collect_bins_locked(dqe, hist_id, &hist_chan->event->event.bins);
 #endif
 		histogram_chan_emmit_event_locked(dqe, hist_id);
 	}
@@ -975,6 +976,7 @@ atc_bool_store(struct exynos_dqe *dqe, bool *val, const char *buf, size_t count)
 	return count;
 }
 
+#if IS_ENABLED(CONFIG_SOC_ZUMA)
 static ssize_t
 atc_u32_store(struct exynos_dqe *dqe, u32 *val, const char *buf, size_t count)
 {
@@ -988,6 +990,7 @@ atc_u32_store(struct exynos_dqe *dqe, u32 *val, const char *buf, size_t count)
 
 	return count;
 }
+#endif
 
 #define DQE_ATC_ATTR_RW(_name, _save, _fmt)	\
 static ssize_t _name##_store(struct device *dev,	\

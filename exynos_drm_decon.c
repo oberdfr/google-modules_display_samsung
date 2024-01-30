@@ -391,9 +391,11 @@ update_dsi_config_from_exynos_connector(struct decon_config *config,
 		config->dsc.dsc_count = exynos_mode->dsc.dsc_count;
 		config->dsc.slice_count = exynos_mode->dsc.slice_count;
 		config->dsc.slice_height = exynos_mode->dsc.slice_height;
-		config->dsc.slice_width =
-			DIV_ROUND_UP(config->image_width, config->dsc.slice_count);
+		config->dsc.slice_width = DIV_ROUND_UP(
+			config->image_width / (config->mode.dsi_mode == DSI_MODE_DUAL_DSI ? 2 : 1),
+			config->dsc.slice_count);
 		config->dsc.cfg = exynos_mode->dsc.cfg;
+		config->dsc.is_scrv4 = exynos_mode->dsc.is_scrv4;
 	}
 
 	is_vid_mode = (exynos_mode->mode_flags & MIPI_DSI_MODE_VIDEO) != 0;
@@ -1823,16 +1825,24 @@ static void decon_unbind(struct device *dev, struct device *master,
 	struct decon_device *decon = dev_get_drvdata(dev);
 	decon_debug(decon, "%s +\n", __func__);
 
+	if (decon_is_effectively_active(decon))
+		decon_disable(decon->crtc);
+
+	device_remove_file(dev, &dev_attr_early_wakeup);
+
 	/* Remove symlink to decon device */
 	snprintf(symlink_name_buffer, 7, "decon%d", decon->id);
 	sysfs_remove_link(&decon->drm_dev->dev->kobj,
 			  (const char *) symlink_name_buffer);
 
-	device_remove_file(dev, &dev_attr_early_wakeup);
 	if (IS_ENABLED(CONFIG_EXYNOS_BTS))
 		decon->bts.ops->deinit(decon);
 
-	decon_disable(decon->crtc);
+#if IS_ENABLED(CONFIG_EXYNOS_ITMON)
+	itmon_notifier_chain_unregister(&decon->itmon_nb);
+#endif
+	iommu_unregister_device_fault_handler(dev);
+
 	decon_debug(decon, "%s -\n", __func__);
 }
 

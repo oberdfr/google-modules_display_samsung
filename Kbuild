@@ -23,7 +23,9 @@ ccflags-$(CONFIG_SOC_GS201) += -I$(srctree)/$(src)/cal_9855
 exynos-drm-$(CONFIG_SOC_GS201) += cal_9855/decon_reg.o
 exynos-drm-$(CONFIG_SOC_GS201) += cal_9855/dpp_reg.o
 exynos-drm-$(CONFIG_SOC_GS201) += cal_9855/dqe_reg.o
+ifeq ($(CONFIG_DRM_SAMSUNG_DP),y)
 exynos-drm-$(CONFIG_SOC_GS201) += cal_9855/dp_reg.o
+endif
 
 ccflags-$(CONFIG_SOC_ZUMA) += -I$(srctree)/$(src)/cal_9865
 exynos-drm-$(CONFIG_SOC_ZUMA) += cal_9865/decon_reg.o
@@ -31,8 +33,10 @@ exynos-drm-$(CONFIG_SOC_ZUMA) += cal_9865/dsim_reg.o
 exynos-drm-$(CONFIG_SOC_ZUMA) += cal_9865/dpp_reg.o
 exynos-drm-$(CONFIG_SOC_ZUMA) += cal_9865/dqe_reg.o
 exynos-drm-$(CONFIG_SOC_ZUMA) += cal_9865/hdr_reg.o
-exynos-drm-$(CONFIG_DRM_SAMSUNG_DP) += cal_9865/dp_reg.o
-exynos-drm-$(CONFIG_DRM_SAMSUNG_DP) += displayport/dp_zuma.o
+ifeq ($(CONFIG_DRM_SAMSUNG_DP),y)
+exynos-drm-$(CONFIG_SOC_ZUMA) += cal_9865/dp_reg.o
+exynos-drm-$(CONFIG_SOC_ZUMA) += displayport/dp_zuma.o
+endif
 
 exynos-drm-y += exynos_drm_drv.o
 exynos-drm-y += exynos_drm_crtc.o
@@ -56,7 +60,12 @@ exynos-drm-$(CONFIG_DRM_SAMSUNG_WB)		+= exynos_drm_writeback.o
 
 ccflags-$(CONFIG_DRM_SAMSUNG_DP)		+= -I$(srctree)/drivers/usb
 ccflags-$(CONFIG_DRM_SAMSUNG_DP)		+= -I$(srctree)/../private/google-modules/soc/gs/include
+
+ifeq ($(CONFIG_SOC_ZUMA),y)
 exynos-drm-$(CONFIG_DRM_SAMSUNG_DP)		+= exynos_drm_dp.o
+else
+exynos-drm-$(CONFIG_DRM_SAMSUNG_DP)		+= exynos_drm_dp-whi_placeholder.o
+endif
 
 exynos-drm-$(CONFIG_EXYNOS_BTS)			+= exynos_drm_bts.o
 

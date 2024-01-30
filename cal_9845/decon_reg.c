@@ -1039,7 +1039,8 @@ static void dsc_reg_dump_pps(u32 id, u32 dsc_id)
 #endif
 }
 
-static void dsc_reg_set_pps(u32 id, u32 dsc_id, struct decon_dsc *dsc_enc)
+static void dsc_reg_set_pps(u32 id, u32 dsc_id, struct decon_config *config,
+			    struct decon_dsc *dsc_enc)
 {
 	u32 val;
 	u8 b;
@@ -1134,12 +1135,15 @@ static void dsc_reg_set_pps(u32 id, u32 dsc_id, struct decon_dsc *dsc_enc)
 		dsc_reg_set_pps_58_59_rc_range_param0(id, dsc_id,
 			dsc_enc->rc_range_parameters);
 
-#ifndef VESA_SCR_V4
-		/* PPS79 ~ PPS87 : 3HF4 is different with VESA SCR v4 */
-		dsc_write(id, DSC_PPS76_79(dsc_id), 0x1AB62AF6);
-		dsc_write(id, DSC_PPS80_83(dsc_id), 0x2B342B74);
-		dsc_write(id, DSC_PPS84_87(dsc_id), 0x3B746BF4);
-#endif
+		if (config->dsc.is_scrv4) {
+			dsc_write(id, DSC_PPS76_79(dsc_id), 0x1AB62AB6);
+			dsc_write(id, DSC_PPS80_83(dsc_id), 0x2AF42AF4);
+			dsc_write(id, DSC_PPS84_87(dsc_id), 0x4B346374);
+		} else {
+			dsc_write(id, DSC_PPS76_79(dsc_id), 0x1AB62AF6);
+			dsc_write(id, DSC_PPS80_83(dsc_id), 0x2B342B74);
+			dsc_write(id, DSC_PPS84_87(dsc_id), 0x3B746BF4);
+		}
 	}
 
 	dsc_reg_dump_pps(id, dsc_id);
@@ -1352,16 +1356,16 @@ static void dsc_reg_set_encoder(u32 id, struct decon_config *config,
 	if (id == 1) {
 		dsc_reg_config_control(id, DECON_DSC_ENC1, ds_en, sm_ch,
 				dsc_enc->slice_width);
-		dsc_reg_set_pps(id, DECON_DSC_ENC1, dsc_enc);
+		dsc_reg_set_pps(id, DECON_DSC_ENC1, config, dsc_enc);
 	} else if (id == 2) {	/* only for DP */
 		dsc_reg_config_control(id, DECON_DSC_ENC2, ds_en, sm_ch,
 				dsc_enc->slice_width);
-		dsc_reg_set_pps(id, DECON_DSC_ENC2, dsc_enc);
+		dsc_reg_set_pps(id, DECON_DSC_ENC2, config, dsc_enc);
 	} else {
 		for (dsc_id = 0; dsc_id < config->dsc.dsc_count; dsc_id++) {
 			dsc_reg_config_control(id, dsc_id, ds_en, sm_ch,
 					dsc_enc->slice_width);
-			dsc_reg_set_pps(id, dsc_id, dsc_enc);
+			dsc_reg_set_pps(id, dsc_id, config, dsc_enc);
 		}
 	}
 

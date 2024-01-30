@@ -266,6 +266,8 @@ enum dpu_event_type {
 	DPU_EVT_PARTIAL_UPDATE,
 	DPU_EVT_PARTIAL_RESTORE,
 
+	DPU_EVT_HIST_COLLECT_BINS,
+
 	DPU_EVT_DSIM_CRC,
 	DPU_EVT_DSIM_ECC,
 
@@ -394,6 +396,10 @@ struct dpu_log_plane_info {
 	u32 format;
 };
 
+struct dpu_log_hist_info {
+	enum exynos_histogram_id id;
+};
+
 struct dpu_log_decon_cfg {
 	u32 fps;
 	u32 image_width;
@@ -420,6 +426,7 @@ struct dpu_log {
 		struct dpu_log_bts_event bts_event;
 		struct dpu_log_partial partial;
 		struct dpu_log_plane_info plane_info;
+		struct dpu_log_hist_info hist_info;
 		struct dpu_log_decon_cfg decon_cfg;
 		unsigned int value;
 	} data;

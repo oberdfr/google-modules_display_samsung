@@ -767,6 +767,12 @@ int exynos_atomic_enter_tui(void)
 	if (private->tui_enabled)
 		return -EBUSY;
 
+	if (mutex_trylock(&private->dp_tui_lock) == 0) {
+		/* DP connection is active, bail out */
+		pr_info("%s: unable to enter TUI, DP is active\n", __func__);
+		return -EBUSY;
+	}
+
 	drm_for_each_crtc(crtc, dev) {
 		decon = crtc_to_decon(crtc);
 		hibernation_block_exit(decon->hibernation);
@@ -775,8 +781,10 @@ int exynos_atomic_enter_tui(void)
 	DRM_MODESET_LOCK_ALL_BEGIN(dev, ctx, 0, ret);
 
 	state = drm_atomic_helper_duplicate_state(dev, &ctx);
-	if (IS_ERR(state))
+	if (IS_ERR(state)) {
+		ret = -ENOMEM;
 		goto err_dup;
+	}
 
 	mode_config->suspend_state = state;
 
@@ -871,6 +879,8 @@ err_state_alloc:
 		mode_config->suspend_state = NULL;
 	}
 err_dup:
+	if (ret)
+		mutex_unlock(&private->dp_tui_lock);
 	DRM_MODESET_LOCK_ALL_END(dev, ctx, ret);
 	pr_debug("%s -\n", __func__);
 
@@ -935,6 +945,7 @@ int exynos_atomic_exit_tui(void)
 	DRM_MODESET_LOCK_ALL_END(dev, ctx, ret);
 	if (!ret)
 		drm_atomic_state_put(state);
+	mutex_unlock(&private->dp_tui_lock);
 
 	pr_debug("%s -\n", __func__);
 	return ret;
@@ -1098,6 +1109,9 @@ static int exynos_drm_bind(struct device *dev)
 	init_waitqueue_head(&private->wait);
 	spin_lock_init(&private->lock);
 
+	private->tui_enabled = false;
+	mutex_init(&private->dp_tui_lock);
+
 	dev_set_drvdata(dev, drm);
 
 	ret = drmm_mode_config_init(drm);
@@ -1110,10 +1124,8 @@ static int exynos_drm_bind(struct device *dev)
 	exynos_drm_connector_create_properties(drm);
 
 	priv_state = kzalloc(sizeof(*priv_state), GFP_KERNEL);
-	if (!priv_state) {
-		ret = -ENOMEM;
-		goto err_free_drm;
-	}
+	if (!priv_state)
+		return -ENOMEM;
 
 	priv_state->available_win_mask = BIT(MAX_WIN_PER_DECON) - 1;
 
@@ -1186,8 +1198,6 @@ err_unbind_all:
 	component_unbind_all(dev, drm);
 err_priv_state_cleanup:
 	drm_atomic_private_obj_fini(&private->obj);
-err_free_drm:
-	drm_dev_put(drm);
 
 	return ret;
 }
@@ -1209,6 +1219,8 @@ static void exynos_drm_unbind(struct device *dev)
 	component_unbind_all(dev, drm);
 
 	drm_dev_put(drm);
+
+	dev_set_drvdata(dev, NULL);
 }
 
 static const struct component_master_ops exynos_drm_ops = {
@@ -1221,6 +1233,8 @@ static int exynos_drm_platform_probe(struct platform_device *pdev)
 	struct component_match *match;
 
 	pdev->dev.coherent_dma_mask = DMA_BIT_MASK(32);
+
+	platform_set_drvdata(pdev, NULL);
 
 	match = exynos_drm_match_add(&pdev->dev);
 	if (IS_ERR(match))
@@ -1238,7 +1252,10 @@ static int exynos_drm_platform_remove(struct platform_device *pdev)
 
 static void exynos_drm_platform_shutdown(struct platform_device *pdev)
 {
-	drm_atomic_helper_shutdown(platform_get_drvdata(pdev));
+	struct drm_device *drm_dev = platform_get_drvdata(pdev);
+
+	if (drm_dev)
+		drm_atomic_helper_shutdown(drm_dev);
 }
 
 static struct platform_driver exynos_drm_platform_driver = {
