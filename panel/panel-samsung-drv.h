@@ -150,6 +150,12 @@ enum exynos_cabc_mode {
 	CABC_MOVIE_MODE,
 };
 
+enum gpio_level {
+	GPIO_LEVEL_LOW = 0,
+	GPIO_LEVEL_HIGH,
+	GPIO_LEVEL_UNSPECIFIED,
+};
+
 struct exynos_panel;
 
 struct exynos_panel_te2_timing {
@@ -812,6 +818,7 @@ struct exynos_panel {
 	struct gpio_desc *vddd_gpio;
 	struct regulator *vddr_en;
 	struct regulator *vddr;
+	enum gpio_level vddd_gpio_fixed_level;
 	u32 vddd_normal_uV;
 	u32 vddd_lp_uV;
 	struct exynos_drm_connector exynos_connector;
