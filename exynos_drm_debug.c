@@ -782,7 +782,7 @@ static void dpu_event_log_print(const struct decon_device *decon, struct drm_pri
 			break;
 
 		rem_nsec = do_div(ts, 1000000000);
-		len = scnprintf(buf, sizeof(buf), "[%6llu.%06lu] %20s",
+		len = scnprintf(buf, sizeof(buf), "<%6llu.%06lu> %20s",
 				ts, rem_nsec / 1000, get_event_name(log->type));
 
 		switch (log->type) {
