@@ -1182,7 +1182,8 @@ static void _decon_mode_update_bts_handover(struct decon_device *decon,
 
 static void decon_mode_update_bts(struct decon_device *decon,
 				const struct drm_display_mode *mode,
-				const unsigned int vblank_usec)
+				const unsigned int vblank_usec,
+				bool ignore_op_rate)
 {
 	struct videomode vm;
 	int mode_bts_fps = exynos_drm_mode_bts_fps(mode);
@@ -1193,14 +1194,14 @@ static void decon_mode_update_bts(struct decon_device *decon,
 	decon->bts.vfp = vm.vfront_porch;
 	decon->bts.vsa = vm.vsync_len;
 	decon->bts.fps = (mode_bts_fps >= decon->bts.op_rate ||
-				!IS_BTS2OPRATE_MODE(mode->flags)) ?
+				(!IS_BTS2OPRATE_MODE(mode->flags) || ignore_op_rate)) ?
 					mode_bts_fps : decon->bts.op_rate;
 	decon->bts.vblank_usec = vblank_usec;
 
 	decon->config.image_width = mode->hdisplay;
 	decon->config.image_height = mode->vdisplay;
 
-	decon_debug(decon, "update decon bts config for mode: %dx%dx%d\n",
+	decon_info(decon, "update decon bts config for mode: %dx%dx%d\n",
 		    mode->hdisplay, mode->vdisplay, decon->bts.fps);
 
 	atomic_set(&decon->bts.delayed_update, 0);
@@ -1211,11 +1212,12 @@ static void decon_mode_update_bts(struct decon_device *decon,
 
 static void decon_seamless_mode_bts_update(struct decon_device *decon,
 					const struct drm_display_mode *mode,
-					const unsigned int vblank_usec)
+					const unsigned int vblank_usec,
+					bool ignore_op_rate)
 {
 	int mode_bts_fps = exynos_drm_mode_bts_fps(mode);
 	int request_bts_fps = (mode_bts_fps >= decon->bts.op_rate ||
-				!IS_BTS2OPRATE_MODE(mode->flags)) ?
+				(!IS_BTS2OPRATE_MODE(mode->flags) || ignore_op_rate)) ?
 					mode_bts_fps : decon->bts.op_rate;
 
 	DPU_ATRACE_BEGIN(__func__);
@@ -1234,7 +1236,7 @@ static void decon_seamless_mode_bts_update(struct decon_device *decon,
 		decon->bts.pending_vblank_usec = vblank_usec;
 		atomic_set(&decon->bts.delayed_update, 3);
 	} else {
-		decon_mode_update_bts(decon, mode, vblank_usec);
+		decon_mode_update_bts(decon, mode, vblank_usec, ignore_op_rate);
 	}
 	DPU_ATRACE_END(__func__);
 }
@@ -1270,22 +1272,31 @@ void decon_mode_bts_pre_update(struct decon_device *decon,
 				const struct drm_crtc_state *crtc_state,
 				const struct drm_atomic_state *old_state)
 {
+	const struct drm_connector_state *conn_state =
+		crtc_get_phys_connector_state(old_state, crtc_state);
 	const struct exynos_drm_crtc_state *exynos_crtc_state = to_exynos_crtc_state(crtc_state);
 	unsigned int vblank_usec = 0;
+	bool ignore_op_rate = false;
+
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	if (conn_state && is_gs_drm_connector(conn_state->connector)) {
+		ignore_op_rate = to_gs_connector(conn_state->connector)->ignore_op_rate;
+	}
+#endif
 
 	if (exynos_crtc_state->seamless_mode_changed || decon->bts.pending_fps_update) {
 		if (decon->config.mode.op_mode == DECON_COMMAND_MODE)
 			vblank_usec = decon_get_vblank_usec(crtc_state, old_state);
 
-		decon_seamless_mode_bts_update(decon, &crtc_state->adjusted_mode, vblank_usec);
+		decon_seamless_mode_bts_update(decon, &crtc_state->adjusted_mode, vblank_usec, ignore_op_rate);
 		decon->bts.pending_fps_update = false;
 	} else if (drm_atomic_crtc_needs_modeset(crtc_state)) {
 		if (decon->config.mode.op_mode == DECON_COMMAND_MODE)
 			vblank_usec = decon_get_vblank_usec(crtc_state, old_state);
 
-		decon_mode_update_bts(decon, &crtc_state->adjusted_mode, vblank_usec);
+		decon_mode_update_bts(decon, &crtc_state->adjusted_mode, vblank_usec, ignore_op_rate);
 	} else if (!atomic_dec_if_positive(&decon->bts.delayed_update)) {
-		decon_mode_update_bts(decon, &crtc_state->mode, decon->bts.pending_vblank_usec);
+		decon_mode_update_bts(decon, &crtc_state->mode, decon->bts.pending_vblank_usec, ignore_op_rate);
 	}
 
 	decon->bts.ops->calc_bw(decon);
