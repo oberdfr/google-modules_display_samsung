@@ -5353,14 +5353,16 @@ static void disp_stats_init(struct exynos_panel *ctx)
 	}
 	available_count = stats->res_table_count *
 				stats->vrefresh_range_count;
-
+	// DISPLAY_STATE_ON
 	stats->time_in_state[DISPLAY_STATE_ON].available_count =
 			available_count;
 
+	// DISPLAY_STATE_HBM
 	if (funcs && funcs->set_hbm_mode)
 		stats->time_in_state[DISPLAY_STATE_HBM].available_count =
 			available_count;
 
+	// DISPLAY_STATE_LP
 	if (ctx->desc->lp_vrefresh_range) {
 		stats->lp_vrefresh_range_count = ctx->desc->lp_vrefresh_range_count;
 		if (stats->lp_vrefresh_range_count > MAX_VREFRESH_RANGES) {
