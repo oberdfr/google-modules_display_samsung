@@ -1370,12 +1370,18 @@ static void update_config_for_mode_gs(struct dsim_reg_config *config,
 	const struct gs_display_mode *gs_mode = &gs_conn_state->gs_mode;
 	unsigned int te_idle_us = gs_mode->underrun_param ? gs_mode->underrun_param->te_idle_us : 0;
 	unsigned int te_var = gs_mode->underrun_param ? gs_mode->underrun_param->te_var : 0;
+	unsigned int slice_count = 0;
+	unsigned int slice_height = 0;
 
 	_update_config_timing(config, mode, gs_mode->underrun_param ? true : false, te_idle_us,
 			      te_var);
 	_update_config_mode_flags(config, gs_mode->mode_flags);
+	if (gs_mode->dsc.cfg) {
+		slice_count = gs_mode->dsc.cfg->slice_count;
+		slice_height = gs_mode->dsc.cfg->slice_height;
+	}
 	_update_config_dsc(config, gs_mode->bpc, gs_mode->dsc.enabled, gs_mode->dsc.dsc_count,
-			   gs_mode->dsc.cfg->slice_count, gs_mode->dsc.cfg->slice_height);
+			   slice_count, slice_height);
 }
 
 static void dsim_atomic_mode_set_gs(struct dsim_device *dsim, struct drm_crtc_state *crtc_state,
