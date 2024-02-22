@@ -136,6 +136,7 @@ extern struct dsim_device *dsim_drvdata[MAX_DSI_CNT];
  * @atomic_mode_set: Sets mode
  * @set_state_recovering: Sets connector state to reflect recovery
  * @update_config_for_mode: Updates dsim_reg to match mode
+ * @update_hs_clk: Updates HS clock for panel usage
  */
 struct dsim_connector_funcs {
 	int (*atomic_check)(const struct dsim_device *dsim, struct drm_crtc_state *crtc_state,
@@ -146,6 +147,7 @@ struct dsim_connector_funcs {
 	void (*update_config_for_mode)(struct dsim_reg_config *config,
 				       const struct drm_display_mode *mode,
 				       const struct drm_connector_state *conn_state);
+	void (*update_hs_clk)(struct dsim_device *dsim, struct drm_connector_state *conn_state);
 };
 struct dsim_connector_funcs *get_connector_funcs(const struct drm_connector_state *conn_state);
 

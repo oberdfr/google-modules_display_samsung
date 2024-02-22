@@ -365,14 +365,29 @@ static void dsim_encoder_enable(struct drm_encoder *encoder, struct drm_atomic_s
 	dsim_debug(dsim, "current state: %d\n", dsim->state);
 
 	if (connector) {
-		struct drm_connector_state *conn_state =
+		struct drm_connector_state *new_conn_state =
+				drm_atomic_get_new_connector_state(state, connector);
+		struct drm_connector_state *old_conn_state =
 				drm_atomic_get_old_connector_state(state, connector);
 
-		if (conn_state && atomic_read(&decon->recovery.recovering)) {
-			struct dsim_connector_funcs *funcs = get_connector_funcs(conn_state);
+		if (new_conn_state) {
+			struct dsim_connector_funcs *funcs = get_connector_funcs(new_conn_state);
+
+			if (funcs && funcs->update_hs_clk) {
+				funcs->update_hs_clk(dsim, new_conn_state);
+
+				/* Ideally new clock should be applied while enabling DSIM */
+				mutex_lock(&dsim->state_lock);
+				dsim->clk_param.hs_clk_changed = false;
+				mutex_unlock(&dsim->state_lock);
+			}
+		}
+
+		if (old_conn_state && atomic_read(&decon->recovery.recovering)) {
+			struct dsim_connector_funcs *funcs = get_connector_funcs(old_conn_state);
 
 			if (funcs && funcs->set_state_recovering) {
-				funcs->set_state_recovering(conn_state);
+				funcs->set_state_recovering(old_conn_state);
 				dsim_debug(dsim, "%s: doing recovery\n", __func__);
 			}
 		}
@@ -390,7 +405,6 @@ static void dsim_encoder_enable(struct drm_encoder *encoder, struct drm_atomic_s
 		if (WARN(!dsim->dev_link, "unable to create dev link between decon/dsim\n"))
 			return;
 	}
-
 
 	if (dsim->state == DSIM_STATE_SUSPEND || dsim->state == DSIM_STATE_HANDOVER) {
 		_dsim_enable(dsim);
@@ -1310,19 +1324,27 @@ static int dsim_atomic_check_exynos(const struct dsim_device *dsim,
 	return 0;
 }
 
+static void update_hs_clk_exynos(struct dsim_device *dsim, struct drm_connector_state *conn_state)
+{
+}
+
 static struct dsim_connector_funcs exynos_dsim_connector_funcs = {
 	.atomic_check = &dsim_atomic_check_exynos,
 	.atomic_mode_set = &dsim_atomic_mode_set_exynos,
 	.set_state_recovering = &set_state_recovering_exynos,
 	.update_config_for_mode = &update_config_for_mode_exynos,
+	.update_hs_clk = &update_hs_clk_exynos,
 };
 
 static int dsim_atomic_check(struct drm_encoder *encoder,
 			     struct drm_crtc_state *crtc_state,
 			     struct drm_connector_state *connector_state)
 {
-	const struct dsim_device *dsim = encoder_to_dsim(encoder);
+	struct dsim_device *dsim = encoder_to_dsim(encoder);
 	const struct dsim_connector_funcs *funcs = get_connector_funcs(connector_state);
+
+	if (funcs && funcs->update_hs_clk)
+		funcs->update_hs_clk(dsim, connector_state);
 
 	if (crtc_state->mode_changed) {
 		if (funcs && funcs->atomic_check)
@@ -1401,11 +1423,23 @@ static void set_state_recovering_gs(struct drm_connector_state *conn_state)
 	gs_conn_state->is_recovering = true;
 }
 
+static void update_hs_clk_gs(struct dsim_device *dsim, struct drm_connector_state *conn_state)
+{
+	struct gs_drm_connector_state *gs_conn_state = to_gs_connector_state(conn_state);
+
+	mutex_lock(&dsim->state_lock);
+	gs_conn_state->dsi_hs_clk = dsim->clk_param.hs_clk;
+	gs_conn_state->pending_dsi_hs_clk = dsim->clk_param.pending_hs_clk;
+	gs_conn_state->dsi_hs_clk_changed = dsim->clk_param.hs_clk_changed;
+	mutex_unlock(&dsim->state_lock);
+}
+
 static struct dsim_connector_funcs gs_dsim_connector_funcs = {
 	.atomic_check = &dsim_atomic_check_gs,
 	.atomic_mode_set = &dsim_atomic_mode_set_gs,
 	.set_state_recovering = &set_state_recovering_gs,
 	.update_config_for_mode = &update_config_for_mode_gs,
+	.update_hs_clk = &update_hs_clk_gs,
 };
 #endif
 
@@ -2930,6 +2964,7 @@ static ssize_t hs_clock_store(struct device *dev,
 		dsim->clk_param.pending_hs_clk = 0;
 		if (pll_param->pll_freq == hs_clock) {
 			dsim_debug(dsim, "set the same hs_clock=%u while active\n", hs_clock);
+			dsim->clk_param.pending_hs_clk = 0;
 			rc = len;
 			goto out;
 		}
