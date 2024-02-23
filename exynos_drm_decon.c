@@ -1743,6 +1743,7 @@ static void decon_wait_for_flip_done(struct exynos_drm_crtc *crtc,
 	struct exynos_drm_crtc_state *new_exynos_crtc_state =
 					to_exynos_crtc_state(new_crtc_state);
 	int fps, recovering;
+	bool fs_success = true;
 
 	if (!new_crtc_state->active)
 		return;
@@ -1782,6 +1783,7 @@ static void decon_wait_for_flip_done(struct exynos_drm_crtc *crtc,
 			 */
 			if (!recovering && !(decon->config.out_type & DECON_OUT_DP))
 				decon_trigger_recovery(decon);
+			fs_success = false;
 		} else {
 			pr_warn("decon%u scheduler late to service fs irq handle (%d fps)\n",
 					decon->id, fps);
@@ -1796,6 +1798,9 @@ static void decon_wait_for_flip_done(struct exynos_drm_crtc *crtc,
 
 	if (new_exynos_crtc_state->wb_type == EXYNOS_WB_CWB)
 		decon_reg_set_cwb_enable(decon->id, false);
+
+	if (fs_success && decon->dqe)
+		histogram_flip_done(decon->dqe);
 }
 
 static const struct exynos_drm_crtc_ops decon_crtc_ops = {
