@@ -994,7 +994,7 @@ static void dsim_reg_set_hresol(u32 id, u32 hresol,
 	dsim_write_mask(id, DSIM_RESOL, val, DSIM_RESOL_HRESOL_MASK);
 }
 
-static void dsim_reg_set_porch(u32 id, struct dsim_reg_config *config)
+static void dsim_reg_set_porch(u32 id, const struct dsim_reg_config *config)
 {
 	if (config->mode == DSIM_VIDEO_MODE) {
 		dsim_reg_set_vporch(id, config->p_timing.vbp,
@@ -2230,6 +2230,7 @@ void dsim_reg_set_rr_config(u32 id, const struct dsim_reg_config *config,
 		dsim_reg_set_cmd_ctrl(id, config, clks);
 	} else if (config->mode == DSIM_VIDEO_MODE) {
 		dsim_reg_set_hperiod(id, config, clks);
+		dsim_reg_set_porch(id, config);
 	}
 }
 
