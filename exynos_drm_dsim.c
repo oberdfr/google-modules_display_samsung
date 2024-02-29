@@ -1428,8 +1428,8 @@ static void update_hs_clk_gs(struct dsim_device *dsim, struct drm_connector_stat
 	struct gs_drm_connector_state *gs_conn_state = to_gs_connector_state(conn_state);
 
 	mutex_lock(&dsim->state_lock);
-	gs_conn_state->dsi_hs_clk = dsim->clk_param.hs_clk;
-	gs_conn_state->pending_dsi_hs_clk = dsim->clk_param.pending_hs_clk;
+	gs_conn_state->dsi_hs_clk_mbps = dsim->clk_param.hs_clk;
+	gs_conn_state->pending_dsi_hs_clk_mbps = dsim->clk_param.pending_hs_clk;
 	gs_conn_state->dsi_hs_clk_changed = dsim->clk_param.hs_clk_changed;
 	mutex_unlock(&dsim->state_lock);
 }
