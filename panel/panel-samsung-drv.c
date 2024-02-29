@@ -5645,8 +5645,8 @@ int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 
 	BLOCKING_INIT_NOTIFIER_HEAD(&ctx->notifier_head);
 
-	if (ctx->desc->default_dsi_hs_clk)
-		ctx->dsi_hs_clk = ctx->desc->default_dsi_hs_clk;
+	if (ctx->desc->default_dsi_hs_clk_mbps)
+		ctx->dsi_hs_clk_mbps = ctx->desc->default_dsi_hs_clk_mbps;
 
 	mutex_init(&ctx->mode_lock);
 	mutex_init(&ctx->crtc_lock);
