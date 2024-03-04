@@ -119,9 +119,8 @@ static const struct exynos_dsi_cmd s6e3fc3_init_cmds[] = {
 
 	EXYNOS_DSI_CMD0(test_key_on_f0),
 
-	/* TE rising time */
-	EXYNOS_DSI_CMD_SEQ_REV(PANEL_REV_LT(PANEL_REV_EVT1),
-			       0xB9, 0x01, 0x09, 0x5C, 0x00, 0x0B),
+	/* TE width */
+	EXYNOS_DSI_CMD_SEQ(0xB9, 0x01, 0x09, 0x5C, 0x00, 0x0B),
 
 	/* FQ CON setting */
 	EXYNOS_DSI_CMD_SEQ(0xB0, 0x27, 0xF2),
@@ -540,7 +539,7 @@ static const struct exynos_panel_mode s6e3fc3_modes[] = {
 		.exynos_mode = {
 			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
 			.vblank_usec = 120,
-			.te_usec = 5630,
+			.te_usec = 5760,
 			.bpc = 8,
 			.dsc = {
 				.enabled = true,
@@ -574,7 +573,7 @@ static const struct exynos_panel_mode s6e3fc3_modes[] = {
 		.exynos_mode = {
 			.mode_flags = MIPI_DSI_CLOCK_NON_CONTINUOUS,
 			.vblank_usec = 120,
-			.te_usec = 140,
+			.te_usec = 215,
 			.bpc = 8,
 			.dsc = {
 				.enabled = true,
