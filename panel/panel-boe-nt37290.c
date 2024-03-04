@@ -884,6 +884,19 @@ static void nt37290_set_lp_mode(struct exynos_panel *ctx,
 	dev_dbg(ctx->dev, "%s: done\n", __func__);
 }
 
+#define TE_WIDTH_USEC 162
+static void nt37290_wait_for_vsync_done(struct exynos_panel *ctx, u32 vrefresh)
+{
+	if (vrefresh != 60 && vrefresh != 120) {
+		dev_err(ctx->dev, "%s: unsupported refresh rate (%d)\n",
+			__func__, vrefresh);
+		return;
+	}
+
+	exynos_panel_wait_for_vsync_done(ctx, TE_WIDTH_USEC,
+			EXYNOS_VREFRESH_TO_PERIOD_USEC(vrefresh));
+}
+
 static void nt37290_wait_one_vblank(struct exynos_panel *ctx,
 				    const struct exynos_panel_mode *pmode)
 {
@@ -941,6 +954,7 @@ static int nt37290_enable(struct drm_panel *panel)
 	const struct drm_display_mode *mode;
 	const bool needs_reset = !is_panel_enabled(ctx);
 	bool is_fhd;
+	u32 vrefresh;
 
 	if (!pmode) {
 		dev_err(ctx->dev, "no current mode set\n");
@@ -949,6 +963,7 @@ static int nt37290_enable(struct drm_panel *panel)
 
 	mode = &pmode->mode;
 	is_fhd = mode->hdisplay == 1080;
+	vrefresh = needs_reset ? 60 : drm_mode_vrefresh(mode);
 
 	dev_dbg(ctx->dev, "%s (%s)\n", __func__, is_fhd ? "fhd" : "wqhd");
 
@@ -962,13 +977,24 @@ static int nt37290_enable(struct drm_panel *panel)
 		nt37290_update_panel_feat(ctx, pmode, true);
 	}
 
+	/* make sure both DPU and panel PPS are set in the same VSYNC */
+	if (ctx->mode_in_progress == MODE_RES_IN_PROGRESS)
+		nt37290_wait_for_vsync_done(ctx, vrefresh);
+	else if (ctx->mode_in_progress == MODE_RES_AND_RR_IN_PROGRESS)
+		nt37290_wait_for_vsync_done(ctx, ctx->last_rr);
+
 	exynos_panel_send_cmd_set(ctx,
 				  is_fhd ? &nt37290_dsc_fhd_cmd_set : &nt37290_dsc_wqhd_cmd_set);
 
 	if (pmode->exynos_mode.is_lp_mode)
 		nt37290_set_lp_mode(ctx, pmode);
-	else if (needs_reset || ctx->panel_state == PANEL_STATE_BLANK)
-		EXYNOS_DCS_WRITE_TABLE(ctx, display_on);
+	else {
+		if (!needs_reset)
+			nt37290_change_frequency(ctx, pmode);
+
+		if (needs_reset || ctx->panel_state == PANEL_STATE_BLANK)
+			EXYNOS_DCS_WRITE_TABLE(ctx, display_on);
+	}
 
 	DPU_ATRACE_END(__func__);
 

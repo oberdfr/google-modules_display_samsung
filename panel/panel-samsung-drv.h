@@ -576,6 +576,14 @@ struct exynos_panel_funcs {
 	 * This callback is used to get panel power Vreg settings.
 	 */
 	void (*get_pwr_vreg)(struct exynos_panel *exynos_panel, char *buf, size_t len);
+
+	/**
+	 * @on_queue_ddic_cmd
+	 *
+	 * This callback is to nofity the panel driver when a ddic command is queued.
+	 */
+	void (*on_queue_ddic_cmd)(struct exynos_panel *exynos_panel,
+			const struct mipi_dsi_msg *msg, const bool is_last);
 };
 
 /**
