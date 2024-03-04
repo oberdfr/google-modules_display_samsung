@@ -85,11 +85,11 @@ enum {
 };
 
 struct dsim_clks {
-	u32 hs_clk;
+	u32 hs_clk; /* megabits per second */
 	u32 esc_clk;
 	u32 byte_clk;
 	u32 word_clk;
-	u32 pending_hs_clk;
+	u32 pending_hs_clk; /* megabits per second */
 	bool hs_clk_changed;
 };
 

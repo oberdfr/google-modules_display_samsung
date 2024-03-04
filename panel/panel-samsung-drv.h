@@ -559,8 +559,9 @@ struct exynos_panel_funcs {
 	 * @update_ffc
 	 *
 	 * This callback is used to update FFC (Frame Frequency Control) for panel.
+	 * The unit of DSI HS clock is Mbps (megabits per second).
 	 */
-	void (*update_ffc)(struct exynos_panel *exynos_panel, unsigned int hs_clk);
+	void (*update_ffc)(struct exynos_panel *exynos_panel, unsigned int hs_clk_mbps);
 
 	/**
 	 * @pre_update_ffc
@@ -708,7 +709,8 @@ struct exynos_panel_desc {
 	const u32 normal_mode_work_delay_ms;
 	/* Panel ready timeout */
 	unsigned int rdy_timeout_ms;
-	const u32 default_dsi_hs_clk;
+	/* DSI HS clock (megabits per second) */
+	const u32 default_dsi_hs_clk_mbps;
 	/* Set true if need to keep ATC on while switching op_hz if it's already on */
 	const bool keep_atc_on_for_op;
 };
@@ -978,8 +980,8 @@ struct exynos_panel {
 	bool boosted_for_op_hz;
 	/* indicated whether ATC needs to be enabled */
 	bool atc_need_enabled;
-	/* current MIPI DSI HS clock (frequency) */
-	u32 dsi_hs_clk;
+	/* current MIPI DSI HS clock (megabits per second) */
+	u32 dsi_hs_clk_mbps;
 };
 
 /**
