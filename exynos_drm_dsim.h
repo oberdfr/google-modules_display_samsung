@@ -97,6 +97,8 @@ struct dsim_device {
 	int irq;
 	int id;
 	u32 panel_id;
+	/** @panel_index: 0 primary, 1 secondary */
+	int panel_index;
 	spinlock_t slock;
 	struct mutex cmd_lock;
 	struct mutex state_lock;

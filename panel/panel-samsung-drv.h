@@ -906,6 +906,9 @@ struct exynos_panel {
 	u32 panel_rev;
 	enum drm_panel_orientation orientation;
 
+	/** @panel_index: indicates primary or secondary panel */
+	int panel_index;
+
 	struct device_node *touch_dev;
 
 	struct te2_data te2;

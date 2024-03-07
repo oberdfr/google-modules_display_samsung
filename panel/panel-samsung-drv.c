@@ -43,6 +43,13 @@
 #define PANEL_SLSI_DDIC_ID_LEN	5
 #define PROJECT_CODE_MAX	5
 
+#ifndef DISPLAY_PANEL_INDEX_PRIMARY
+#define DISPLAY_PANEL_INDEX_PRIMARY 0
+#endif
+#ifndef DISPLAY_PANEL_INDEX_SECONDARY
+#define DISPLAY_PANEL_INDEX_SECONDARY 1
+#endif
+
 static const char ext_info_regs[] = { 0xDA, 0xDB, 0xDC, 0xA1 };
 
 static const char * const disp_state_str[] = {
@@ -3963,16 +3970,15 @@ static int exynos_panel_attach_properties(struct exynos_panel *ctx)
 
 static const char *exynos_panel_get_sysfs_name(struct exynos_panel *ctx)
 {
-	struct mipi_dsi_device *dsi = to_mipi_dsi_device(ctx->dev);
-	const char *p = !IS_ERR(dsi) ? dsi->name : NULL;
-
-	if (p == NULL || p[1] != ':' || p[0] == '0')
+	switch (ctx->panel_index) {
+	case DISPLAY_PANEL_INDEX_PRIMARY:
 		return "primary-panel";
-	if (p[0] == '1')
+	case DISPLAY_PANEL_INDEX_SECONDARY:
 		return "secondary-panel";
-
-	dev_err(ctx->dev, "unsupported dsi device name %s\n", dsi->name);
-	return "primary-panel";
+	default:
+		dev_err(ctx->dev, "unsupported panel_index %d\n", ctx->panel_index);
+		return "primary-panel";
+	}
 }
 
 static void exynos_panel_debugfs_init(struct drm_bridge *bridge,
@@ -5526,10 +5532,28 @@ static void notify_brightness_changed_worker(struct work_struct *work)
 	sysfs_notify(&ctx->bl->dev.kobj, NULL, "brightness");
 }
 
+/**
+ * parse_panel_index() - Resolves display index from dsi name
+ * @dsi: dsi device corresponding to panel
+ *
+ * Assuming the dsi name follows the form "<idx>:<panel_name>...",
+ * resolves the idx value into a valid panel_index
+ *
+ * Return: panel_index on success, -1 on error
+ */
+static int parse_panel_index(const struct mipi_dsi_device *dsi)
+{
+	if (dsi->name[1] != ':' || dsi->name[0] == '0')
+		return DISPLAY_PANEL_INDEX_PRIMARY;
+	else if (dsi->name[0] == '1')
+		return DISPLAY_PANEL_INDEX_SECONDARY;
+	else
+		return -EINVAL;
+}
+
 int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 				struct exynos_panel *ctx)
 {
-	static atomic_t panel_index = ATOMIC_INIT(-1);
 	struct device *dev = &dsi->dev;
 	int ret = 0;
 	char name[32];
@@ -5545,6 +5569,12 @@ int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 
 	dsi->lanes = ctx->desc->data_lane_cnt;
 	dsi->format = MIPI_DSI_FMT_RGB888;
+
+	ctx->panel_index = parse_panel_index(dsi);
+	if (ctx->panel_index < 0) {
+		dev_err(dev, "Invalid panel panel_index parsed from dsi name %s\n", dsi->name);
+		return -EINVAL;
+	}
 
 	ret = exynos_panel_parse_dt(ctx);
 	if (ret)
@@ -5576,7 +5606,7 @@ int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 	if (ctx->panel_model[0] == '\0')
 		scnprintf(ctx->panel_model, PANEL_MODEL_MAX, "Common Panel");
 
-	scnprintf(name, sizeof(name), "panel%d-backlight", atomic_inc_return(&panel_index));
+	scnprintf(name, sizeof(name), "panel%d-backlight", ctx->panel_index);
 	ctx->bl = devm_backlight_device_register(ctx->dev, name, dev,
 			ctx, &exynos_backlight_ops, NULL);
 	if (IS_ERR(ctx->bl)) {
