@@ -2918,7 +2918,7 @@ static ssize_t hs_clock_store(struct device *dev,
 	struct dsim_pll_param *pll_param;
 	int rc;
 	unsigned int hs_clock;
-	bool apply_now = true;
+	bool apply_now = false;
 
 	char params[32];
 	char *hs_clk_str;
