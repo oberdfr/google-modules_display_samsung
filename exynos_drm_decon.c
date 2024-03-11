@@ -284,6 +284,7 @@ static int decon_enable_vblank(struct exynos_drm_crtc *crtc)
 	else /* if te is not enabled, use framestart interrupt to track vsyncs */
 		enable_irq(decon->irq_fs);
 
+	DPU_ATRACE_INT_PID("vblank", 1, decon->thread->pid);
 	DPU_EVENT_LOG(DPU_EVT_VBLANK_ENABLE, decon->id, NULL);
 
 	decon_debug(decon, "%s -\n", __func__);
@@ -302,6 +303,7 @@ static void decon_disable_vblank(struct exynos_drm_crtc *crtc)
 	else /* if te is not enabled, we're using framestart interrupt to track vsyncs */
 		disable_irq_nosync(decon->irq_fs);
 
+	DPU_ATRACE_INT_PID("vblank", 0, decon->thread->pid);
 	DPU_EVENT_LOG(DPU_EVT_VBLANK_DISABLE, decon->id, NULL);
 
 	hibernation_unblock_enter(decon->hibernation);
