@@ -1028,6 +1028,7 @@ static int s6e3hc4_enable(struct drm_panel *panel)
 	const struct drm_display_mode *mode;
 	const bool needs_reset = !is_panel_enabled(ctx);
 	bool is_fhd;
+	u32 vrefresh;
 
 	if (!pmode) {
 		dev_err(ctx->dev, "no current mode set\n");
@@ -1035,11 +1036,18 @@ static int s6e3hc4_enable(struct drm_panel *panel)
 	}
 	mode = &pmode->mode;
 	is_fhd = mode->hdisplay == 1080;
+	vrefresh = needs_reset ? 60 : drm_mode_vrefresh(mode);
 
 	dev_dbg(ctx->dev, "%s\n", __func__);
 
 	if (needs_reset)
 		exynos_panel_reset(ctx);
+
+	/* wait TE falling for RRS since DSC and framestart must in the same VSYNC */
+	if (ctx->mode_in_progress == MODE_RES_IN_PROGRESS)
+		s6e3hc4_wait_for_vsync_done(ctx, vrefresh);
+	else if (ctx->mode_in_progress == MODE_RES_AND_RR_IN_PROGRESS)
+		s6e3hc4_wait_for_vsync_done(ctx, ctx->last_rr);
 
 	/* DSC related configuration */
 	EXYNOS_DCS_WRITE_SEQ(ctx, 0x9D, 0x01);
@@ -1068,8 +1076,6 @@ static int s6e3hc4_enable(struct drm_panel *panel)
 		s6e3hc4_change_frequency(ctx, pmode);
 
 		if (needs_reset || (ctx->panel_state == PANEL_STATE_BLANK)) {
-			u32 vrefresh = needs_reset ? 60 : drm_mode_vrefresh(&pmode->mode);
-
 			s6e3hc4_wait_for_vsync_done(ctx, vrefresh);
 			exynos_panel_send_cmd_set(ctx, &s6e3hc4_display_on_cmd_set);
 		}
