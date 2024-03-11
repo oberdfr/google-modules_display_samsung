@@ -590,7 +590,10 @@ static void dsim_encoder_disable(struct drm_encoder *encoder, struct drm_atomic_
 			pm_runtime_put_sync(dsim->dev);
 		}
 	} else {
-		if (was_in_self_refresh) {
+		if (dsim->state == DSIM_STATE_BYPASS) {
+			pm_runtime_set_suspended(dsim->dev);
+			dsim->state = DSIM_STATE_SUSPEND;
+		} else if (was_in_self_refresh) {
 			/* get extra ref count dropped when going into self refresh */
 			pm_runtime_get_sync(dsim->dev);
 

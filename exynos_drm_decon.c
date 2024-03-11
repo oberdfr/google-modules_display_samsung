@@ -2134,6 +2134,13 @@ static int decon_parse_dt(struct decon_device *decon, struct device_node *np)
 		decon_debug(decon, "\n");
 	}
 
+	if (of_property_read_u32(np, "max_dfs_lv_for_wb", &decon->bts.max_dfs_lv_for_wb)) {
+		decon->bts.max_dfs_lv_for_wb = 0;
+		decon_debug(decon, "max_dfs_lv_for_wb is not defined in DT.\n");
+	} else {
+		decon_debug(decon, "max_dfs_lv_for_wb(%u)\n", decon->bts.max_dfs_lv_for_wb);
+	}
+
 	decon->dpp_cnt = of_count_phandle_with_args(np, "dpps", NULL);
 	for (i = 0; i < decon->dpp_cnt; ++i) {
 		dpp_np = of_parse_phandle(np, "dpps", i);
