@@ -148,6 +148,10 @@ void DPU_EVENT_LOG(enum dpu_event_type type, int index, void *priv)
 	}
 
 	decon = get_decon_drvdata(index);
+	if (unlikely(!decon)) {
+		pr_err("%s: Invalid decon (%d)\n", __func__, index);
+		return;
+	}
 	if (IS_ERR_OR_NULL(decon->d.event_log))
 		return;
 
@@ -369,6 +373,10 @@ void DPU_EVENT_LOG_ATOMIC_COMMIT(int index)
 	}
 
 	decon = get_decon_drvdata(index);
+	if (unlikely(!decon)) {
+		pr_err("%s: Invalid decon (%d)\n", __func__, index);
+		return;
+	}
 	log = dpu_event_get_next(decon);
 	if (!log)
 		return;
@@ -412,8 +420,13 @@ DPU_EVENT_LOG_CMD(struct dsim_device *dsim, u8 type, u8 d0, u16 len)
 {
 	int i;
 	struct decon_device *decon = (struct decon_device *)dsim_get_decon(dsim);
-	struct dpu_log *log = dpu_event_get_next(decon);
+	struct dpu_log *log;
 
+	if (unlikely(!decon)) {
+		pr_err("%s: Invalid decon\n", __func__);
+		return;
+	}
+	log = dpu_event_get_next(decon);
 	if (!log)
 		return;
 
