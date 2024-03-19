@@ -66,7 +66,10 @@
 #include "exynos_drm_crtc.h"
 #include "exynos_drm_decon.h"
 #include "exynos_drm_dsim.h"
+
+#if IS_ENABLED(CONFIG_QUEUE_DDIC_CMD_CALL_BACK)
 #include "panel/panel-samsung-drv.h"
+#endif
 
 #if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
 #include "gs_drm/gs_drm_connector.h"
@@ -2391,11 +2394,14 @@ static int dsim_write_data_locked(struct dsim_device *dsim, const struct mipi_ds
 	const u16 flags = msg->flags;
 	bool is_last;
 	struct mipi_dsi_packet packet = { .size = 0 };
+
+#if IS_ENABLED(CONFIG_QUEUE_DDIC_CMD_CALL_BACK)
 	const struct drm_bridge *bridge = dsim->panel_bridge;
 	struct exynos_panel *panel = bridge ?
 		container_of((bridge), struct exynos_panel, bridge) : NULL;
 	const struct exynos_panel_funcs *funcs = (panel && panel->desc) ?
 		panel->desc->exynos_panel_func : NULL;
+#endif
 
 	WARN_ON(!mutex_is_locked(&dsim->cmd_lock));
 
@@ -2474,8 +2480,10 @@ trace_dsi_cmd:
 	/* TODO(b/278175371): print actual delay time */
 	trace_dsi_tx(msg->type, msg->tx_buf, msg->tx_len, is_last, dsim->tx_delay_ms);
 	dsim_debug(dsim, "%s last command\n", is_last ? "" : "Not");
+#if IS_ENABLED(CONFIG_QUEUE_DDIC_CMD_CALL_BACK)
 	if (funcs && funcs->on_queue_ddic_cmd)
 		funcs->on_queue_ddic_cmd(panel, msg, is_last);
+#endif
 err:
 	trace_dsi_cmd_fifo_status(dsim->total_pend_ph, dsim->total_pend_pl);
 	DPU_ATRACE_END(__func__);
