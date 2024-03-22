@@ -1549,7 +1549,7 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 		/* If using gs_drm_connector, only need to change name;
 		 * panel detection and name comparison happens in connector
 		 */
-		gs_connector_set_panel_name(pname, strnlen(pname, PANEL_DRV_LEN));
+		gs_connector_set_panel_name(pname, strnlen(pname, PANEL_DRV_LEN), idx);
 		return 0;
 	}
 	/* implied else case: search for legacy panel below */
@@ -1675,6 +1675,7 @@ static int dsim_parse_panel_name(struct dsim_device *dsim)
 	idx = PANEL_PRIORITY_PRI_IDX;
 	if (name && !(panel_usage & BIT(idx))) {
 		dsim->panel_id = dsim_get_panel_id(panel_name);
+		dsim->panel_index = idx;
 		return dsim_add_mipi_dsi_device(dsim, name, idx);
 	}
 
@@ -1682,6 +1683,7 @@ static int dsim_parse_panel_name(struct dsim_device *dsim)
 	idx = PANEL_PRIORITY_SEC_IDX;
 	if (name && name[0] && !(panel_usage & BIT(idx))) {
 		dsim->panel_id = dsim_get_panel_id(sec_panel_name);
+		dsim->panel_index = idx;
 		return dsim_add_mipi_dsi_device(dsim, name, idx);
 	}
 
@@ -1748,15 +1750,12 @@ static int dsim_attach_bridge(struct dsim_device *dsim)
 
 static bool is_primary_panel(struct dsim_device *dsim)
 {
-	const char *name;
-
 	if (!dsim->dsi_device) {
 		dsim_info(dsim, "no dsi_device\n");
 		return false;
 	}
 
-	name = dsim->dsi_device->name;
-	return !name || (name[1] != ':') || (name[0] == '0');
+	return (dsim->panel_index == 0);
 }
 
 static int dsim_bind(struct device *dev, struct device *master, void *data)
