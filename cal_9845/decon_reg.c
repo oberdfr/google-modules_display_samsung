@@ -421,7 +421,7 @@ static void decon_reg_set_data_path(u32 id, struct decon_config *cfg)
 			COMP_OUTIF_PATH_MASK);
 }
 
-void decon_reg_set_cwb_enable(u32 id, u32 en)
+void decon_reg_set_cwb_enable(u32 id, bool en)
 {
 	u32 val, mask, d_path;
 

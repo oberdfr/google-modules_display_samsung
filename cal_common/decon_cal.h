@@ -415,7 +415,7 @@ void decon_reg_set_mres(u32 id, struct decon_config *config);
 /* For writeback configuration */
 void decon_reg_release_resource(u32 id, struct decon_mode *mode);
 void decon_reg_config_wb_size(u32 id, struct decon_config *config);
-void decon_reg_set_cwb_enable(u32 id, u32 en);
+void decon_reg_set_cwb_enable(u32 id, bool en);
 
 /* DECON interrupt control */
 void decon_reg_set_interrupts(u32 id, u32 en);
