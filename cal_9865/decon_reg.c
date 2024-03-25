@@ -182,14 +182,54 @@ static void decon_reg_set_qactive_pll_mode(u32 id, u32 en)
 static u64 pri_sram[MAX_DECON_CNT] = {
 	GENMASK_ULL(10, 0),  /* decon0 : 11 SRAM instances */
 	GENMASK_ULL(21, 11), /* decon1 : 11 SRAM instances */
-	GENMASK_ULL(32, 26), /* decon2 :  7 SRAM instances */
+	0,                   /* decon2 : dynamic allocate SRAM instances */
 };
 
 static u64 sec_sram[MAX_DECON_CNT] = {
-	GENMASK_ULL(25, 22), /* decon0 : 4 SRAM instances */
-	0,                   /* decon1 : 0 SRAM instances */
-	0,                   /* decon2 : none */
+	0, /* decon0 : dynamic allocate SRAM instances */
+	0, /* decon1 : dynamic allocate SRAM instances */
+	0, /* decon2 : none */
 };
+
+/* SRAM instance share to decon2 PRI and decon0/1 SEC */
+const u64 shared_sram = GENMASK_ULL(32, 22);
+
+static bool decon_reg_alloc_shared_sram_instance(u32 id, bool is_pri, bool en)
+{
+	/* allocate SRAM for decon2 PRI */
+	if (id == 2 && is_pri) {
+		if (en) {
+			if (sec_sram[0] || sec_sram[1]) {
+				cal_log_warn(id,
+					"clear CWB SARAM instance (0x%llx, 0x%llx)\n",
+					sec_sram[0], sec_sram[1]);
+				sec_sram[0] = 0;
+				sec_sram[1] = 0;
+			}
+			pri_sram[id] = shared_sram;
+		} else {
+			pri_sram[id] = 0;
+		}
+		return true;
+	}
+
+	/* allocate SRAM for decon0/1 CWB */
+	if ((id == 0 || id == 1) && !is_pri) {
+		if (en) {
+			if (pri_sram[2]) {
+				cal_log_err(id,
+					"DECON2 is active, not able to use CWB on DECON%u\n", id);
+				return false;
+			}
+			sec_sram[id] = shared_sram;
+		} else {
+			sec_sram[id] = 0;
+		}
+		return true;
+	}
+
+	return false;
+}
 
 static void decon_reg_set_sram_enable(u32 id)
 {
@@ -465,10 +505,16 @@ static void decon_reg_set_data_path(u32 id, struct decon_config *cfg)
 			COMP_OUTIF_PATH_MASK);
 }
 
-void decon_reg_set_cwb_enable(u32 id, u32 en)
+void decon_reg_set_cwb_enable(u32 id, bool en)
 {
 	u32 val, mask, d_path;
 
+	if (!decon_reg_alloc_shared_sram_instance(id, false, en)) {
+		cal_log_err(id, "not able allocate SRAM inst for DECON%u CWB\n", id);
+		return;
+	}
+
+	cal_log_info(id, "set cwb for DECON%u (en:%d)\n", id, en);
 	val = decon_read(id, DATA_PATH_CON_0);
 	d_path = COMP_OUTIF_PATH_GET(val);
 
@@ -484,6 +530,7 @@ void decon_reg_set_cwb_enable(u32 id, u32 en)
 					CWB_OF_IDX_F(CWB_OF_IDX_OF2) |
 					WB_SEL_IF_F(WB_SEL_IF_0),
 					CWB_OF_IDX_MASK | WB_SEL_IF_MASK);
+	decon_reg_set_sram_enable(id);
 }
 
 void decon_reg_set_dqe_enable(u32 id, bool en)
@@ -1863,6 +1910,8 @@ int decon_reg_init(u32 id, struct decon_config *config)
 	if (config->out_type & DECON_OUT_DP)
 		decon_reg_set_qactive_pll_mode(id, 1);
 
+	decon_reg_alloc_shared_sram_instance(id, true, true);
+
 	decon_reg_set_sram_enable(id);
 
 	decon_reg_set_operation_mode(id, config->mode.op_mode);
@@ -1940,6 +1989,9 @@ int decon_reg_stop(u32 id, struct decon_config *config, bool rst, u32 fps)
 			config->mode.dsi_mode != DSI_MODE_DUAL_DSI)
 		decon_reg_set_pll_wakeup(id, 1);
 #endif
+
+	if (decon_reg_alloc_shared_sram_instance(id, true, false))
+		decon_reg_set_sram_enable(id);
 
 	if (config->out_type & DECON_OUT_DP)
 		decon_reg_set_qactive_pll_mode(id, 0);
