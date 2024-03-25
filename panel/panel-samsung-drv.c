@@ -494,7 +494,8 @@ int exynos_panel_init(struct exynos_panel *ctx)
 				 "failed to get panel extinfo, default to latest\n");
 			ctx->panel_rev = PANEL_REV_LATEST;
 		} else {
-			funcs->get_panel_rev(ctx, id);
+			/* reverse here to match the id order read from bootloader */
+			funcs->get_panel_rev(ctx, __builtin_bswap32(id));
 		}
 	} else if (!ctx->panel_rev) {
 		dev_warn(ctx->dev,
