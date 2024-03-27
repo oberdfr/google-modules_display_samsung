@@ -55,6 +55,7 @@
 #define EXYNOS_DRM_WAIT_FENCE_TIMEOUT_MS 250
 
 EXPORT_TRACEPOINT_SYMBOL(tracing_mark_write);
+EXPORT_TRACEPOINT_SYMBOL(dsi_label_scope);
 
 /* connector->base.dev->mode_config.connection_mutex should be acquired at calling this function */
 int exynos_drm_drv_set_lhbm_hist(struct exynos_drm_connector *connector, int x, int y, int w, int h)
