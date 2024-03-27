@@ -59,8 +59,6 @@
 #include <regs-dsim.h>
 
 #include <trace/dpu_trace.h>
-#define CREATE_TRACE_POINTS
-#include <trace/panel_trace.h>
 
 #include "exynos_drm_connector.h"
 #include "exynos_drm_crtc.h"
@@ -76,8 +74,6 @@
 #define BRIDGE_PORT 0
 #define BRIDGE_ENDPOINT 0
 #endif
-
-EXPORT_TRACEPOINT_SYMBOL(dsi_label_scope);
 
 struct dsim_device *dsim_drvdata[MAX_DSI_CNT];
 
