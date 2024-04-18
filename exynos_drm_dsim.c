@@ -1524,6 +1524,41 @@ static bool dsim_has_graph_link_to_bridge(struct device *dsim_dev)
 		return false;
 	return true;
 }
+
+/**
+ * dsim_parse_remote_port() - Get reg property of remote port in a connector
+ * @dsim_dev: Pointer to device object associated with dsim device
+ *
+ * Specifically, this function parses the reg property of the port linked from
+ * the dsim entry in the device tree, using the BRIDGE_PORT and BRIDGE_ENDPOINT
+ * constants (default: port 0, endpoint 0).
+ *
+ * Return: reg property of the remote port linked from the dsim entry
+ */
+static int dsim_parse_remote_port(struct device *dsim_dev)
+{
+	struct device_node *endpoint_node, *remote_endpoint_node;
+	struct of_endpoint endpoint;
+
+	/* Get endpoint node in dsim device */
+	endpoint_node =
+		of_graph_get_endpoint_by_regs(dsim_dev->of_node, BRIDGE_PORT, BRIDGE_ENDPOINT);
+	if (!endpoint_node)
+		return 0;
+
+	/* Get remote-endpoint node linked to endpoint_node */
+	remote_endpoint_node = of_graph_get_remote_endpoint(endpoint_node);
+	of_node_put(endpoint_node);
+	if (!remote_endpoint_node)
+		return 0;
+
+	/* Get endpoint data structure from remote_endpoint_node */
+	of_graph_parse_endpoint(remote_endpoint_node, &endpoint);
+	of_node_put(remote_endpoint_node);
+
+	/* Return reg property of the port which endpoint belongs to */
+	return endpoint.port;
+}
 #endif
 
 static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
@@ -1549,6 +1584,9 @@ static int dsim_add_mipi_dsi_device(struct dsim_device *dsim,
 		 * panel detection and name comparison happens in connector
 		 */
 		gs_connector_set_panel_name(pname, strnlen(pname, PANEL_DRV_LEN), idx);
+		if (dsim_parse_remote_port(dsim->dev) >= 1)
+			dsim->dual_dsi = DSIM_DUAL_DSI_SEC;
+		/* if port == 0, then we can find out if it's actual dual dsi or not later */
 		return 0;
 	}
 	/* implied else case: search for legacy panel below */
@@ -1778,6 +1816,13 @@ static int dsim_bind(struct device *dev, struct device *master, void *data)
 
 		/* ignore cases where there's no dsi device to be attached */
 		return ret == -ENODEV ? 0 : ret;
+	}
+
+	if (of_property_read_bool(dsim->dsi_device->dev.of_node, "google,dual-dsi-panel")) {
+		if (!exynos_get_dual_dsi(DSIM_DUAL_DSI_SEC))
+			dsim_err(dsim, "google,dual-dsi-panel is set, but cannot get sec dsi\n");
+		else
+			dsim->dual_dsi = DSIM_DUAL_DSI_MAIN;
 	}
 
 	drm_encoder_init(drm_dev, encoder, &dsim_encoder_funcs,
