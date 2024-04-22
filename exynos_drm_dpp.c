@@ -1602,7 +1602,7 @@ struct dpp_device *of_find_dpp_by_node(struct device_node *np)
 
 	return dev ? dev_get_drvdata(dev) : NULL;
 }
-EXPORT_SYMBOL(of_find_dpp_by_node);
+EXPORT_SYMBOL_GPL(of_find_dpp_by_node);
 #endif
 
 MODULE_AUTHOR("Seong-gyu Park <seongyu.park@samsung.com>");

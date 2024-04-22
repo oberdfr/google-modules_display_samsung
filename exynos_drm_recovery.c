@@ -69,4 +69,4 @@ void exynos_recovery_register(struct decon_device *decon)
 
 	pr_info("ESD recovery is supported\n");
 }
-EXPORT_SYMBOL(exynos_recovery_register);
+EXPORT_SYMBOL_GPL(exynos_recovery_register);

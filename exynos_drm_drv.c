@@ -94,7 +94,7 @@ int exynos_drm_drv_set_lhbm_hist(struct exynos_drm_connector *connector, int x, 
 
 	return 0;
 }
-EXPORT_SYMBOL(exynos_drm_drv_set_lhbm_hist);
+EXPORT_SYMBOL_GPL(exynos_drm_drv_set_lhbm_hist);
 
 int exynos_drm_drv_get_lhbm_gray_level(struct exynos_drm_connector *conn)
 {
@@ -113,7 +113,7 @@ int exynos_drm_drv_get_lhbm_gray_level(struct exynos_drm_connector *conn)
 		return 0;
 	return decon->dqe->lhbm_gray_level;
 }
-EXPORT_SYMBOL(exynos_drm_drv_get_lhbm_gray_level);
+EXPORT_SYMBOL_GPL(exynos_drm_drv_get_lhbm_gray_level);
 
 static struct exynos_drm_priv_state *exynos_drm_get_priv_state(struct drm_atomic_state *state)
 {
