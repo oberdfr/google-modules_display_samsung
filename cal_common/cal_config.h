@@ -18,7 +18,6 @@
 #include <linux/io.h>		/* readl/writel */
 #include <linux/delay.h>	/* udelay */
 #include <linux/err.h>		/* EBUSY, EINVAL */
-#include <linux/export.h>	/* EXPORT_SYMBOL */
 #include <linux/printk.h>	/* pr_xxx */
 #include <linux/types.h>	/* uint32_t, __iomem, ... */
 #include <linux/iopoll.h>

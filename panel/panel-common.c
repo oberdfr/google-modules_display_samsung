@@ -135,7 +135,7 @@ u32 panel_cmn_calc_gamma_2_2_luminance(const u32 value, const u32 max_value, con
 
 	return mult_frac(gamma_2_2_coef_x_1m[i], nit, 1000000);
 }
-EXPORT_SYMBOL(panel_cmn_calc_gamma_2_2_luminance);
+EXPORT_SYMBOL_GPL(panel_cmn_calc_gamma_2_2_luminance);
 
 /**
  * panel_cmn_calc_linear_luminance() - calculate prorated luminance based on linear curve
@@ -152,7 +152,7 @@ u32 panel_cmn_calc_linear_luminance(const u32 value, const u32 coef_x_1k, const 
 {
 	return mult_frac(value, coef_x_1k, 1000) + offset;
 }
-EXPORT_SYMBOL(panel_cmn_calc_linear_luminance);
+EXPORT_SYMBOL_GPL(panel_cmn_calc_linear_luminance);
 
 MODULE_AUTHOR("Shiyong Li <shiyongli@google.com>");
 MODULE_DESCRIPTION("Google panel common utility");

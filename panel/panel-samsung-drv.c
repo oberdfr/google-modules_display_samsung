@@ -84,7 +84,7 @@ inline void exynos_panel_msleep(u32 delay_ms)
 {
 	dsim_trace_msleep(delay_ms);
 }
-EXPORT_SYMBOL(exynos_panel_msleep);
+EXPORT_SYMBOL_GPL(exynos_panel_msleep);
 static void exynos_panel_node_attach(struct exynos_drm_connector *exynos_connector);
 
 static inline bool is_backlight_off_state(const struct backlight_device *bl)
@@ -141,7 +141,7 @@ int exynos_panel_configure_te2_edges(struct exynos_panel *ctx,
 
 	return 0;
 }
-EXPORT_SYMBOL(exynos_panel_configure_te2_edges);
+EXPORT_SYMBOL_GPL(exynos_panel_configure_te2_edges);
 
 ssize_t exynos_panel_get_te2_edges(struct exynos_panel *ctx,
 				   char *buf, bool lp_mode)
@@ -170,7 +170,7 @@ ssize_t exynos_panel_get_te2_edges(struct exynos_panel *ctx,
 
 	return len;
 }
-EXPORT_SYMBOL(exynos_panel_get_te2_edges);
+EXPORT_SYMBOL_GPL(exynos_panel_get_te2_edges);
 
 int exynos_panel_get_current_mode_te2(struct exynos_panel *ctx,
 				      struct exynos_panel_te2_timing *timing)
@@ -224,7 +224,7 @@ int exynos_panel_get_current_mode_te2(struct exynos_panel *ctx,
 
 	return -EINVAL;
 }
-EXPORT_SYMBOL(exynos_panel_get_current_mode_te2);
+EXPORT_SYMBOL_GPL(exynos_panel_get_current_mode_te2);
 
 static void exynos_panel_update_te2(struct exynos_panel *ctx)
 {
@@ -354,7 +354,7 @@ int exynos_panel_read_id(struct exynos_panel *ctx)
 
 	return 0;
 }
-EXPORT_SYMBOL(exynos_panel_read_id);
+EXPORT_SYMBOL_GPL(exynos_panel_read_id);
 
 int exynos_panel_read_ddic_id(struct exynos_panel *ctx)
 {
@@ -375,7 +375,7 @@ int exynos_panel_read_ddic_id(struct exynos_panel *ctx)
 				ctx->panel_id, sizeof(ctx->panel_id));
 	return 0;
 }
-EXPORT_SYMBOL(exynos_panel_read_ddic_id);
+EXPORT_SYMBOL_GPL(exynos_panel_read_ddic_id);
 
 static int exynos_panel_read_extinfo(struct exynos_panel *ctx)
 {
@@ -445,7 +445,7 @@ void exynos_panel_get_panel_rev(struct exynos_panel *ctx, u8 rev)
 
 	dev_info(ctx->dev, "panel_rev: 0x%x\n", ctx->panel_rev);
 }
-EXPORT_SYMBOL(exynos_panel_get_panel_rev);
+EXPORT_SYMBOL_GPL(exynos_panel_get_panel_rev);
 
 void exynos_panel_get_revision_by_module_ids(struct exynos_panel *ctx, u32 module_id)
 {
@@ -545,7 +545,7 @@ int exynos_panel_init(struct exynos_panel *ctx)
 
 	return ret;
 }
-EXPORT_SYMBOL(exynos_panel_init);
+EXPORT_SYMBOL_GPL(exynos_panel_init);
 
 static int exynos_panel_wait_ready(struct exynos_panel *ctx)
 {
@@ -634,7 +634,7 @@ int exynos_panel_reset(struct exynos_panel *ctx)
 
 	return 0;
 }
-EXPORT_SYMBOL(exynos_panel_reset);
+EXPORT_SYMBOL_GPL(exynos_panel_reset);
 
 static void _exynos_panel_set_vddd_voltage(struct exynos_panel *ctx, bool is_lp)
 {
@@ -758,7 +758,7 @@ int exynos_panel_set_power(struct exynos_panel *ctx, bool on)
 
 	return 0;
 }
-EXPORT_SYMBOL(exynos_panel_set_power);
+EXPORT_SYMBOL_GPL(exynos_panel_set_power);
 
 static void exynos_panel_post_power_on(struct exynos_panel *ctx)
 {
@@ -960,7 +960,7 @@ const struct exynos_panel_mode *exynos_panel_get_mode(struct exynos_panel *ctx,
 
 	return NULL;
 }
-EXPORT_SYMBOL(exynos_panel_get_mode);
+EXPORT_SYMBOL_GPL(exynos_panel_get_mode);
 
 int exynos_panel_get_modes(struct drm_panel *panel, struct drm_connector *connector)
 {
@@ -1002,7 +1002,7 @@ int exynos_panel_get_modes(struct drm_panel *panel, struct drm_connector *connec
 
 	return i;
 }
-EXPORT_SYMBOL(exynos_panel_get_modes);
+EXPORT_SYMBOL_GPL(exynos_panel_get_modes);
 
 static void _exynos_panel_disable_normal_feat_locked(struct exynos_panel *ctx)
 {
@@ -1048,7 +1048,7 @@ int exynos_panel_disable(struct drm_panel *panel)
 	dev_dbg(ctx->dev, "%s\n", __func__);
 	return 0;
 }
-EXPORT_SYMBOL(exynos_panel_disable);
+EXPORT_SYMBOL_GPL(exynos_panel_disable);
 
 int exynos_panel_unprepare(struct drm_panel *panel)
 {
@@ -1060,7 +1060,7 @@ int exynos_panel_unprepare(struct drm_panel *panel)
 	dev_dbg(ctx->dev, "%s -\n", __func__);
 	return 0;
 }
-EXPORT_SYMBOL(exynos_panel_unprepare);
+EXPORT_SYMBOL_GPL(exynos_panel_unprepare);
 
 int exynos_panel_prepare(struct drm_panel *panel)
 {
@@ -1073,7 +1073,7 @@ int exynos_panel_prepare(struct drm_panel *panel)
 
 	return 0;
 }
-EXPORT_SYMBOL(exynos_panel_prepare);
+EXPORT_SYMBOL_GPL(exynos_panel_prepare);
 
 void exynos_panel_send_cmd_set_flags(struct exynos_panel *ctx,
 				     const struct exynos_dsi_cmd_set *cmd_set, u32 flags)
@@ -1128,7 +1128,7 @@ void exynos_panel_send_cmd_set_flags(struct exynos_panel *ctx,
 			usleep_range(delay_ms * 1000, delay_ms * 1000 + 10);
 	}
 }
-EXPORT_SYMBOL(exynos_panel_send_cmd_set_flags);
+EXPORT_SYMBOL_GPL(exynos_panel_send_cmd_set_flags);
 
 void exynos_panel_set_lp_mode(struct exynos_panel *ctx, const struct exynos_panel_mode *pmode)
 {
@@ -1136,7 +1136,7 @@ void exynos_panel_set_lp_mode(struct exynos_panel *ctx, const struct exynos_pane
 
 	dev_info(ctx->dev, "enter %dhz LP mode\n", drm_mode_vrefresh(&pmode->mode));
 }
-EXPORT_SYMBOL(exynos_panel_set_lp_mode);
+EXPORT_SYMBOL_GPL(exynos_panel_set_lp_mode);
 
 void exynos_panel_set_binned_lp(struct exynos_panel *ctx, const u16 brightness)
 {
@@ -1182,7 +1182,7 @@ void exynos_panel_set_binned_lp(struct exynos_panel *ctx, const u16 brightness)
 	if (panel_state == PANEL_STATE_LP)
 		exynos_panel_update_te2(ctx);
 }
-EXPORT_SYMBOL(exynos_panel_set_binned_lp);
+EXPORT_SYMBOL_GPL(exynos_panel_set_binned_lp);
 
 int exynos_panel_init_brightness(struct exynos_panel_desc *desc,
 				const struct exynos_brightness_configuration *configs,
@@ -1231,7 +1231,7 @@ int exynos_panel_set_brightness(struct exynos_panel *exynos_panel, u16 br)
 
 	return exynos_dcs_set_brightness(exynos_panel, brightness);
 }
-EXPORT_SYMBOL(exynos_panel_set_brightness);
+EXPORT_SYMBOL_GPL(exynos_panel_set_brightness);
 
 static int exynos_get_brightness(struct backlight_device *bl)
 {
@@ -1242,7 +1242,7 @@ u16 exynos_panel_get_brightness(struct exynos_panel *exynos_panel)
 {
 	return exynos_get_brightness(exynos_panel->bl);
 }
-EXPORT_SYMBOL(exynos_panel_get_brightness);
+EXPORT_SYMBOL_GPL(exynos_panel_get_brightness);
 
 static int exynos_bl_find_range(struct exynos_panel *ctx,
 				int brightness, u32 *range)
@@ -1597,7 +1597,7 @@ unsigned int panel_get_idle_time_delta(struct exynos_panel *ctx)
 
 	return delta_ms;
 }
-EXPORT_SYMBOL(panel_get_idle_time_delta);
+EXPORT_SYMBOL_GPL(panel_get_idle_time_delta);
 
 static bool panel_idle_queue_delayed_work(struct exynos_panel *ctx)
 {
@@ -2938,7 +2938,7 @@ void exynos_panel_debugfs_create_cmdset(struct exynos_panel *ctx,
 
 	debugfs_create_file(name, 0600, parent, (void *)cmdset, &panel_cmdset_fops);
 }
-EXPORT_SYMBOL(exynos_panel_debugfs_create_cmdset);
+EXPORT_SYMBOL_GPL(exynos_panel_debugfs_create_cmdset);
 
 static int panel_gamma_show(struct seq_file *m, void *data)
 {
@@ -3038,7 +3038,7 @@ int exynos_dcs_write_delay(struct exynos_panel *ctx, const void *data, size_t le
 
 	return exynos_dcs_write(ctx, data, len);
 }
-EXPORT_SYMBOL(exynos_dcs_write_delay);
+EXPORT_SYMBOL_GPL(exynos_dcs_write_delay);
 
 ssize_t exynos_dsi_dcs_write_buffer(struct mipi_dsi_device *dsi,
 				  const void *data, size_t len, u16 flags)
@@ -3066,7 +3066,7 @@ ssize_t exynos_dsi_dcs_write_buffer(struct mipi_dsi_device *dsi,
 
 	return exynos_dsi_dcs_transfer(dsi, type, data, len, flags);
 }
-EXPORT_SYMBOL(exynos_dsi_dcs_write_buffer);
+EXPORT_SYMBOL_GPL(exynos_dsi_dcs_write_buffer);
 
 static int exynos_dsi_name_show(struct seq_file *m, void *data)
 {
@@ -4439,7 +4439,7 @@ int exynos_panel_wait_for_vblank(struct exynos_panel *ctx)
 	WARN_ON(1);
 	return -ENODEV;
 }
-EXPORT_SYMBOL(exynos_panel_wait_for_vblank);
+EXPORT_SYMBOL_GPL(exynos_panel_wait_for_vblank);
 
 void exynos_panel_wait_for_vsync_done(struct exynos_panel *ctx, u32 te_us, u32 period_us)
 {
@@ -4457,7 +4457,7 @@ void exynos_panel_wait_for_vsync_done(struct exynos_panel *ctx, u32 te_us, u32 p
 	usleep_range(delay_us, delay_us + 10);
 	DPU_ATRACE_END(__func__);
 }
-EXPORT_SYMBOL(exynos_panel_wait_for_vsync_done);
+EXPORT_SYMBOL_GPL(exynos_panel_wait_for_vsync_done);
 
 int exynos_panel_register_notifier(struct drm_connector *connector, struct notifier_block *nb)
 {
@@ -5772,7 +5772,7 @@ err_panel:
 
 	return ret;
 }
-EXPORT_SYMBOL(exynos_panel_common_init);
+EXPORT_SYMBOL_GPL(exynos_panel_common_init);
 
 int exynos_panel_probe(struct mipi_dsi_device *dsi)
 {
@@ -5784,7 +5784,7 @@ int exynos_panel_probe(struct mipi_dsi_device *dsi)
 
 	return exynos_panel_common_init(dsi, ctx);
 }
-EXPORT_SYMBOL(exynos_panel_probe);
+EXPORT_SYMBOL_GPL(exynos_panel_probe);
 
 void exynos_panel_remove(struct mipi_dsi_device *dsi)
 {
@@ -5800,7 +5800,7 @@ void exynos_panel_remove(struct mipi_dsi_device *dsi)
 	sysfs_remove_file(&ctx->bl->dev.kobj, &dev_attr_ssc_en.attr);
 	devm_backlight_device_unregister(ctx->dev, ctx->bl);
 }
-EXPORT_SYMBOL(exynos_panel_remove);
+EXPORT_SYMBOL_GPL(exynos_panel_remove);
 
 MODULE_AUTHOR("Jiun Yu <jiun.yu@samsung.com>");
 MODULE_DESCRIPTION("MIPI-DSI based Samsung common panel driver");

@@ -34,20 +34,20 @@ int exynos_drm_connector_set_lhbm_hist(struct exynos_drm_connector *conn, int w,
 
 	return exynos_drm_drv_set_lhbm_hist(conn, x, y, 2 * half_side_len, 2 * half_side_len);
 }
-EXPORT_SYMBOL(exynos_drm_connector_set_lhbm_hist);
+EXPORT_SYMBOL_GPL(exynos_drm_connector_set_lhbm_hist);
 
 int exynos_drm_connector_get_lhbm_gray_level(struct exynos_drm_connector *conn)
 {
 	return exynos_drm_drv_get_lhbm_gray_level(conn);
 }
-EXPORT_SYMBOL(exynos_drm_connector_get_lhbm_gray_level);
+EXPORT_SYMBOL_GPL(exynos_drm_connector_get_lhbm_gray_level);
 
 struct exynos_drm_connector_properties *
 exynos_drm_connector_get_properties(struct exynos_drm_connector *exynos_connector)
 {
 	return dev_get_exynos_connector_properties(exynos_connector->base.dev);
 }
-EXPORT_SYMBOL(exynos_drm_connector_get_properties);
+EXPORT_SYMBOL_GPL(exynos_drm_connector_get_properties);
 
 static void exynos_drm_connector_destroy(struct drm_connector *connector)
 {
@@ -179,7 +179,7 @@ bool is_exynos_drm_connector(const struct drm_connector *connector)
 {
 	return connector->funcs == &exynos_drm_connector_funcs;
 }
-EXPORT_SYMBOL(is_exynos_drm_connector);
+EXPORT_SYMBOL_GPL(is_exynos_drm_connector);
 
 int exynos_drm_connector_init(struct drm_device *dev,
 			      struct exynos_drm_connector *exynos_connector,
@@ -194,7 +194,7 @@ int exynos_drm_connector_init(struct drm_device *dev,
 				 &exynos_drm_connector_funcs,
 				 DRM_MODE_CONNECTOR_DSI);
 }
-EXPORT_SYMBOL(exynos_drm_connector_init);
+EXPORT_SYMBOL_GPL(exynos_drm_connector_init);
 
 static int exynos_drm_connector_create_brightness_properties(struct drm_device *dev)
 {

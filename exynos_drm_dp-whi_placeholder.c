@@ -27,11 +27,11 @@
 #include "exynos_drm_dp.h"
 
 struct dp_device *dp_drvdata;
-EXPORT_SYMBOL(dp_drvdata);
+EXPORT_SYMBOL_GPL(dp_drvdata);
 
 struct blocking_notifier_head dp_ado_notifier_head =
 		BLOCKING_NOTIFIER_INIT(dp_ado_notifier_head);
-EXPORT_SYMBOL(dp_ado_notifier_head);
+EXPORT_SYMBOL_GPL(dp_ado_notifier_head);
 
 #define DP_SUPPORT_TPS(_v) BIT((_v)-1)
 
@@ -41,28 +41,28 @@ int dp_audio_config(struct dp_audio_config *audio_config)
 	pr_err("%s: not supported by this device\n", __func__);
 	return -EINVAL;
 }
-EXPORT_SYMBOL(dp_audio_config);
+EXPORT_SYMBOL_GPL(dp_audio_config);
 
 /* HDCP Driver Handshaking Functions */
 void dp_hdcp_update_cp(u32 drm_cp_status)
 {
 	pr_err("%s: not supported by this device\n", __func__);
 }
-EXPORT_SYMBOL(dp_hdcp_update_cp);
+EXPORT_SYMBOL_GPL(dp_hdcp_update_cp);
 
 int dp_dpcd_read_for_hdcp22(u32 address, u32 length, u8 *data)
 {
 	pr_err("%s: not supported by this device\n", __func__);
 	return -EFAULT;
 }
-EXPORT_SYMBOL(dp_dpcd_read_for_hdcp22);
+EXPORT_SYMBOL_GPL(dp_dpcd_read_for_hdcp22);
 
 int dp_dpcd_write_for_hdcp22(u32 address, u32 length, u8 *data)
 {
 	pr_err("%s: not supported by this device\n", __func__);
 	return -EFAULT;
 }
-EXPORT_SYMBOL(dp_dpcd_write_for_hdcp22);
+EXPORT_SYMBOL_GPL(dp_dpcd_write_for_hdcp22);
 
 static const struct of_device_id dp_of_match[] = {
 	{ .compatible = "samsung,exynos-dp" },
