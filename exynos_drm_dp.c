@@ -30,11 +30,11 @@
 #include "exynos_drm_dp.h"
 
 struct dp_device *dp_drvdata;
-EXPORT_SYMBOL(dp_drvdata);
+EXPORT_SYMBOL_GPL(dp_drvdata);
 
 struct blocking_notifier_head dp_ado_notifier_head =
 		BLOCKING_NOTIFIER_INIT(dp_ado_notifier_head);
-EXPORT_SYMBOL(dp_ado_notifier_head);
+EXPORT_SYMBOL_GPL(dp_ado_notifier_head);
 
 #define DP_SUPPORT_TPS(_v) BIT((_v)-1)
 
@@ -2210,7 +2210,7 @@ int dp_audio_config(struct dp_audio_config *audio_config)
 
 	return 0;
 }
-EXPORT_SYMBOL(dp_audio_config);
+EXPORT_SYMBOL_GPL(dp_audio_config);
 
 /* HDCP Driver Handshaking Functions */
 void dp_hdcp_update_cp(u32 drm_cp_status)
@@ -2224,7 +2224,7 @@ void dp_hdcp_update_cp(u32 drm_cp_status)
 	drm_hdcp_update_content_protection(connector, drm_cp_status);
 	drm_modeset_unlock(&connector->dev->mode_config.connection_mutex);
 }
-EXPORT_SYMBOL(dp_hdcp_update_cp);
+EXPORT_SYMBOL_GPL(dp_hdcp_update_cp);
 
 int dp_dpcd_read_for_hdcp22(u32 address, u32 length, u8 *data)
 {
@@ -2242,7 +2242,7 @@ int dp_dpcd_read_for_hdcp22(u32 address, u32 length, u8 *data)
 	dp_err(dp, "dpcd_read_for_hdcp22 fail(%d): 0x%X\n", ret, address);
 	return (ret < 0) ? ret : -EIO;
 }
-EXPORT_SYMBOL(dp_dpcd_read_for_hdcp22);
+EXPORT_SYMBOL_GPL(dp_dpcd_read_for_hdcp22);
 
 int dp_dpcd_write_for_hdcp22(u32 address, u32 length, u8 *data)
 {
@@ -2260,7 +2260,7 @@ int dp_dpcd_write_for_hdcp22(u32 address, u32 length, u8 *data)
 	dp_err(dp, "dpcd_write_for_hdcp22 fail(%d): 0x%X\n", ret, address);
 	return (ret < 0) ? ret : -EIO;
 }
-EXPORT_SYMBOL(dp_dpcd_write_for_hdcp22);
+EXPORT_SYMBOL_GPL(dp_dpcd_write_for_hdcp22);
 
 /* DP DRM Connector Helper Functions */
 static enum drm_mode_status dp_mode_valid(struct drm_encoder *encoder,
