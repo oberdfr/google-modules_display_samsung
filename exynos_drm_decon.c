@@ -506,6 +506,7 @@ static void decon_update_config(struct decon_config *config,
 	config->mode.trig_mode = DECON_SW_TRIG;
 	config->te_from = MAX_DECON_TE_FROM_DDI;
 	config->dsc.enabled = false;
+	config->dsc.dsc_count = 0;
 	if (config->out_type & DECON_OUT_DP)
 		config->mode.op_mode = DECON_VIDEO_MODE;
 	else
