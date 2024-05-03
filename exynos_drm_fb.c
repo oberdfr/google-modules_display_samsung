@@ -666,27 +666,33 @@ exynos_disable_outputs(struct drm_device *dev, struct drm_atomic_state *old_stat
 		DPU_EVENT_LOG(DPU_EVT_REQ_CRTC_INFO_NEW, decon->id,
 				new_crtc_state);
 
+		/* Shut down everything that needs a full modeset. */
+		if (!drm_atomic_crtc_needs_modeset(new_crtc_state))
+			continue;
+
+		if (!exynos_crtc_needs_disable(old_crtc_state, new_crtc_state))
+			continue;
+
 		if (drm_atomic_crtc_effectively_active(old_crtc_state) && !new_crtc_state->active) {
 			/* keep runtime vote while disabling is taking place */
 			pm_runtime_get_sync(decon->dev);
 			*disabling_crtc_mask |= drm_crtc_mask(crtc);
 		}
 
-		if (old_crtc_state->active && drm_atomic_crtc_needs_modeset(new_crtc_state)) {
-			DPU_ATRACE_BEGIN("crtc_disable");
+		DPU_ATRACE_BEGIN("crtc_disable");
 
-			funcs = crtc->helper_private;
-			if (new_crtc_state->enable && funcs->prepare)
-				funcs->prepare(crtc);
-			else if (funcs->atomic_disable)
-				funcs->atomic_disable(crtc, old_state);
-			else if (funcs->disable)
-				funcs->disable(crtc);
-			else if (funcs->dpms)
-				funcs->dpms(crtc, DRM_MODE_DPMS_OFF);
+		drm_dbg_atomic(dev, "disabling [CRTC:%d:%s]\n", crtc->base.id, crtc->name);
+		funcs = crtc->helper_private;
+		if (new_crtc_state->enable && funcs->prepare)
+			funcs->prepare(crtc);
+		else if (funcs->atomic_disable)
+			funcs->atomic_disable(crtc, old_state);
+		else if (funcs->disable)
+			funcs->disable(crtc);
+		else if (funcs->dpms)
+			funcs->dpms(crtc, DRM_MODE_DPMS_OFF);
 
-			DPU_ATRACE_END("crtc_disable");
-		}
+		DPU_ATRACE_END("crtc_disable");
 	}
 
 	for_each_oldnew_connector_in_state(old_state, connector, old_conn_state,
