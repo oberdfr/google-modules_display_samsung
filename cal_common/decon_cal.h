@@ -39,6 +39,9 @@
 #define MAX_RCD_CNT		0
 #endif
 
+/* connected IDMA starts ahead by 32 lines based on y-position */
+#define DECON_WIN_START_TIME			32
+
 enum decon_regs_id {
 	REGS_DECON0_ID = 0,
 	REGS_DECON1_ID,
