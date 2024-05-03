@@ -798,6 +798,7 @@ static void decon_update_plane(struct exynos_drm_crtc *exynos_crtc,
 	int win_id;
 	bool is_colormap = false;
 	u16 hw_alpha;
+	unsigned int simplified_rot = 0;
 
 	decon_debug(decon, "%s +\n", __func__);
 
@@ -837,7 +838,18 @@ static void decon_update_plane(struct exynos_drm_crtc *exynos_crtc,
 					exynos_plane_state->base.dst.y1);
 	win_info.end_pos = win_end_pos(exynos_plane_state->base.dst.x2,
 					exynos_plane_state->base.dst.y2);
-	win_info.start_time = 0;
+
+	simplified_rot = drm_rotation_simplify(plane_state->rotation,
+            DRM_MODE_ROTATE_0 | DRM_MODE_ROTATE_90 |
+            DRM_MODE_REFLECT_X | DRM_MODE_REFLECT_Y);
+
+    if ((plane_state->dst.y1 <= DECON_WIN_START_TIME)
+	|| (simplified_rot & DRM_MODE_ROTATE_90)){
+		win_info.start_time = 0;
+	}
+    else{
+		win_info.start_time = DECON_WIN_START_TIME;
+	}
 
 	win_info.ch = dpp->id; /* DPP's id is DPP channel number */
 
