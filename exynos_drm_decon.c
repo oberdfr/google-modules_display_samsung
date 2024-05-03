@@ -2135,6 +2135,36 @@ static int decon_parse_dt(struct decon_device *decon, struct device_node *np)
 			decon->bts.afbc_rgb_rt_util_pct, decon->bts.afbc_yuv_rt_util_pct,
 			decon->bts.afbc_clk_ppc_margin);
 
+
+	of_property_read_string(np, "bts_scen_name", &decon->bts_scen.name);
+	if (decon->bts_scen.name && decon->bts_scen.name[0]) {
+		if (of_property_read_u32(np, "bts_scen_min_panel_width", &decon->bts_scen.min_panel_width))
+			decon->bts_scen.min_panel_width = 0;
+		if (of_property_read_u32(np, "bts_scen_min_panel_height", &decon->bts_scen.min_panel_height))
+			decon->bts_scen.min_panel_height = 0;
+		if (of_property_read_u32(np, "bts_scen_min_fps", &decon->bts_scen.min_fps))
+			decon->bts_scen.min_fps = 0;
+		if (of_property_read_u32(np, "bts_scen_min_rt", &decon->bts_scen.min_rt_bw))
+			decon->bts_scen.min_rt_bw = 0;
+		if (of_property_read_u32(np, "bts_scen_max_rt", &decon->bts_scen.max_rt_bw))
+			decon->bts_scen.max_rt_bw = UINT_MAX;
+		if (of_property_read_u32(np, "bts_scen_min_peak", &decon->bts_scen.min_peak_bw))
+			decon->bts_scen.min_peak_bw = 0;
+		if (of_property_read_u32(np, "bts_scen_max_peak", &decon->bts_scen.max_peak_bw))
+			decon->bts_scen.max_peak_bw = UINT_MAX;
+		decon->bts_scen.skip_with_video =
+			of_property_read_bool(np, "bts_scen_skip_with_video");
+		decon_info(decon, "support `%s` under %ux%ux%u, rt %u-%u, peak %u-%u, no-video:%s\n",
+			decon->bts_scen.name,
+			decon->bts_scen.min_panel_width, decon->bts_scen.min_panel_height,
+			decon->bts_scen.min_fps,
+			decon->bts_scen.min_rt_bw, decon->bts_scen.max_rt_bw,
+			decon->bts_scen.min_peak_bw, decon->bts_scen.max_peak_bw,
+			(decon->bts_scen.skip_with_video) ? "yes" : "no");
+	} else {
+		decon_info(decon, "not support to set dpu bts scenario under certain condition.\n");
+	}
+
 	if (of_property_read_u32(np, "dfs_lv_cnt", &dfs_lv_cnt)) {
 		err_flag = true;
 		dfs_lv_cnt = 1;

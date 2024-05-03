@@ -304,6 +304,10 @@ void DPU_EVENT_LOG(enum dpu_event_type type, int index, void *priv)
 		log->data.bts_update.prev_rt_avg_bw = decon->bts.prev_rt_avg_bw;
 		log->data.bts_update.total_bw = decon->bts.total_bw;
 		log->data.bts_update.prev_total_bw = decon->bts.prev_total_bw;
+		if (decon->bts_scen.enabled && decon->bts_scen.voted)
+			log->data.bts_update.dpu_scen_idx = decon->bts_scen.idx;
+		else
+			log->data.bts_update.dpu_scen_idx = 0;
 		break;
 	case DPU_EVT_BTS_CALC_BW:
 		dpu_event_save_freqs(&log->data.bts_cal.freqs);
@@ -517,10 +521,10 @@ static void dpu_print_log_rsc(char *buf, int len, u32 decon_id, struct dpu_log_r
 static int dpu_print_log_bts_update(char *buf, int len, struct dpu_log_bts_update *update)
 {
 	return scnprintf(buf + len, LOG_BUF_SIZE - len,
-			"\tmif(%lu) int(%lu) disp(%lu) peak(%u,%u) rt(%u,%u) total(%u,%u)",
+			"\tmif(%lu) int(%lu) disp(%lu) peak(%u,%u) rt(%u,%u) total(%u,%u) scen(%u)",
 			update->freqs.mif_freq, update->freqs.int_freq, update->freqs.disp_freq,
 			update->prev_peak, update->peak, update->prev_rt_avg_bw, update->rt_avg_bw,
-			update->prev_total_bw, update->total_bw);
+			update->prev_total_bw, update->total_bw, update->dpu_scen_idx);
 }
 
 static int dpu_print_log_partial(char *buf, int len, struct dpu_log_partial *p)

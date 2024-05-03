@@ -144,6 +144,7 @@ struct dpu_bts {
 	u32 max_disp_freq;
 	u32 prev_max_disp_freq;
 	u32 dvfs_max_disp_freq;
+	u32 video_num;
 	u32 ppc;
 	u32 ppc_rotator;
 	u32 ppc_scaler;
@@ -183,6 +184,21 @@ struct dpu_bts {
 	struct dpu_bts_win_config wb_config;
 	struct decon_win_config rcd_win_config;
 	atomic_t delayed_update;
+};
+
+struct dpu_bts_scenario {
+	bool enabled;
+	bool voted;
+	bool skip_with_video;
+	u32 min_panel_width;
+	u32 min_panel_height;
+	u32 min_fps;
+	u32 min_rt_bw;
+	u32 max_rt_bw;
+	u32 min_peak_bw;
+	u32 max_peak_bw;
+	u32 idx;
+	const char *name;
 };
 
 /**
@@ -360,6 +376,7 @@ struct dpu_log_bts_update {
 	u32 prev_rt_avg_bw;
 	u32 total_bw;
 	u32 prev_total_bw;
+	u32 dpu_scen_idx;
 };
 
 struct dpu_log_bts_cal {
@@ -479,6 +496,7 @@ struct decon_device {
 	struct decon_config		config;
 	struct decon_resources		res;
 	struct dpu_bts			bts;
+	struct dpu_bts_scenario		bts_scen;
 	struct decon_debug		d;
 	struct exynos_hibernation	*hibernation;
 	struct drm_pending_vblank_event *event;

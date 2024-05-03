@@ -750,7 +750,7 @@ static void dpu_bts_calc_bw(struct decon_device *decon)
 	struct dpu_bts_win_config *config;
 	struct bts_decon_info bts_info;
 	int idx, i, wb_idx = -1, rcd_idx = -1;
-	u32 read_bw = 0, write_bw;
+	u32 read_bw = 0, write_bw, video_num = 0;
 	u64 resol_clock;
 	u32 vblank_us;
 
@@ -786,6 +786,8 @@ static void dpu_bts_calc_bw(struct decon_device *decon)
 				decon->config.image_height, vblank_us,
 				config[i].dpp_id, &decon->bts);
 		read_bw += bts_info.rdma[idx].bw;
+		if (bts_info.rdma[idx].is_yuv)
+			video_num++;
 	}
 
 	/* write bw calculation */
@@ -828,6 +830,7 @@ static void dpu_bts_calc_bw(struct decon_device *decon)
 	decon->bts.read_bw = read_bw;
 	decon->bts.write_bw = write_bw;
 	decon->bts.total_bw = read_bw + write_bw;
+	decon->bts.video_num = video_num;
 
 	DPU_DEBUG_BTS("  DECON%u total bw = %u, read bw = %u, write bw = %u\n",
 			decon->id, decon->bts.total_bw, decon->bts.read_bw,
@@ -871,6 +874,39 @@ static inline void dpu_bts_update_disp(struct decon_device *decon, u32 disp_freq
 	DPU_ATRACE_END("dpu_bts_update_disp");
 }
 
+static inline void dpu_bts_update_scenario(struct decon_device *decon, struct bts_bw bw)
+{
+	bool need_vote = false;
+
+	if (!decon->bts_scen.enabled)
+		return;
+
+	if (decon->config.image_width >= decon->bts_scen.min_panel_width &&
+		decon->config.image_height >= decon->bts_scen.min_panel_height &&
+		bw.rt >= decon->bts_scen.min_rt_bw && bw.rt <= decon->bts_scen.max_rt_bw &&
+		bw.peak >= decon->bts_scen.min_peak_bw && bw.peak <= decon->bts_scen.max_peak_bw &&
+		decon->bts.fps >= decon->bts_scen.min_fps &&
+		(!decon->bts_scen.skip_with_video ||
+		 (decon->bts_scen.skip_with_video && !decon->bts.video_num))) {
+		need_vote = true;
+	}
+
+	if (decon->bts_scen.voted != need_vote) {
+		DPU_ATRACE_BEGIN(__func__);
+		if (need_vote) {
+			DPU_DEBUG_BTS("decon%u add bts scenario %u",
+				decon->id, decon->bts_scen.idx);
+			bts_add_scenario(decon->bts_scen.idx);
+		} else {
+			DPU_DEBUG_BTS("decon%u del bts scenario %u",
+				decon->id, decon->bts_scen.idx);
+			bts_del_scenario(decon->bts_scen.idx);
+		}
+		decon->bts_scen.voted = need_vote;
+		DPU_ATRACE_END(__func__);
+	}
+}
+
 static void dpu_bts_update_resources(struct decon_device *decon, bool shadow_updated)
 {
 	struct bts_bw bw = { 0 };
@@ -898,6 +934,7 @@ static void dpu_bts_update_resources(struct decon_device *decon, bool shadow_upd
 			min(decon->bts.max_disp_freq, decon->bts.max_dfs_lv_for_wb);
 	}
 
+	dpu_bts_update_scenario(decon, bw);
 	if (shadow_updated) {
 		/* after DECON h/w configs are updated to shadow SFR */
 		if (decon->bts.total_bw < decon->bts.prev_total_bw ||
@@ -936,6 +973,7 @@ static void dpu_bts_release_resources(struct decon_device *decon)
 	if (!decon->bts.enabled)
 		return;
 
+	dpu_bts_update_scenario(decon, bw);
 	dpu_bts_update_bw(decon, bw);
 	decon->bts.prev_peak = 0;
 	decon->bts.prev_rt_avg_bw = 0;
@@ -1005,6 +1043,19 @@ static void dpu_bts_init(struct decon_device *decon)
 		}
 	}
 
+	decon->bts_scen.enabled = false;
+	if (decon->bts_scen.name && decon->bts_scen.name[0]) {
+		decon->bts_scen.idx = bts_get_scenindex(decon->bts_scen.name);
+		if (decon->bts_scen.idx) {
+			decon->bts_scen.enabled = true;
+			DPU_INFO_BTS("decon%u gets `%s bts scenario idx %u\n",
+				decon->id, decon->bts_scen.name, decon->bts_scen.idx);
+		} else {
+			DPU_ERR_BTS("decon%u failed to get `%s` bts scenario",
+				decon->id, decon->bts_scen.name);
+		}
+	}
+
 	decon->bts.enabled = true;
 
 	DPU_INFO_BTS("decon%u bts feature is enabled\n", decon->id);
@@ -1019,6 +1070,8 @@ static void dpu_bts_deinit(struct decon_device *decon)
 	exynos_pm_qos_remove_request(&decon->bts.disp_qos);
 	exynos_pm_qos_remove_request(&decon->bts.int_qos);
 	exynos_pm_qos_remove_request(&decon->bts.mif_qos);
+	if (decon->bts_scen.enabled && decon->bts_scen.voted)
+		bts_del_scenario(decon->bts_scen.idx);
 	DPU_DEBUG_BTS("%s -\n", __func__);
 }
 
