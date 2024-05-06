@@ -855,6 +855,7 @@ void exynos_dqe_reset(struct exynos_dqe *dqe)
 	dqe->force_atc_config.dirty = true;
 	dqe->state.rcd_enabled = false;
 	dqe->state.cgc_gem = NULL;
+	dqe->lhbm_hist_configured = false;
 
 	/* reflect histogram state  */
 	spin_lock_irqsave(&dqe->state.histogram_slock, flags);

@@ -57,6 +57,26 @@
 EXPORT_TRACEPOINT_SYMBOL(tracing_mark_write);
 EXPORT_TRACEPOINT_SYMBOL(dsi_label_scope);
 
+static void exynos_drm_drv_set_lhbm_hist_helper(struct histogram_channel_config *cfg, int x, int y,
+						int w, int h)
+{
+	/*
+	 * HIST_WEIGHT_R 0 ~ 1024 Histogram weight for red
+	 * HIST_WEIGHT_G 0 ~ 1024 Histogram weight for green
+	 * HIST_WEIGHT_B 0 ~ 1024 Histogram weight for blue
+	 * HIST_THRESHOLD 1 ~ 1023 Histogram threshold
+	 */
+	cfg->weights.weight_r = 341;
+	cfg->weights.weight_g = 342;
+	cfg->weights.weight_b = 341;
+	cfg->roi.start_x = x;
+	cfg->roi.start_y = y;
+	cfg->roi.hsize = w;
+	cfg->roi.vsize = h;
+	cfg->threshold = 1;
+	cfg->pos = POST_DQE;
+}
+
 /* connector->base.dev->mode_config.connection_mutex should be acquired at calling this function */
 int exynos_drm_drv_set_lhbm_hist(struct exynos_drm_connector *connector, int x, int y, int w, int h)
 {
@@ -76,26 +96,30 @@ int exynos_drm_drv_set_lhbm_hist(struct exynos_drm_connector *connector, int x, 
 		return -EIO;
 	cfg = &decon->dqe->lhbm_hist_config;
 
-	/*
-	 * HIST_WEIGHT_R 0 ~ 1024 Histogram weight for red
-	 * HIST_WEIGHT_G 0 ~ 1024 Histogram weight for green
-	 * HIST_WEIGHT_B 0 ~ 1024 Histogram weight for blue
-	 * HIST_THRESHOLD 1 ~ 1023 Histogram threshold
-	 */
-	cfg->weights.weight_r = 341;
-	cfg->weights.weight_g = 342;
-	cfg->weights.weight_b = 341;
-	cfg->roi.start_x = x;
-	cfg->roi.start_y = y;
-	cfg->roi.hsize = w;
-	cfg->roi.vsize = h;
-	cfg->threshold = 1;
-	cfg->pos = POST_DQE;
+	exynos_drm_drv_set_lhbm_hist_helper(cfg, x, y, w, h);
 	pr_debug("%s: set lhbm histogram config (x=%d, y=%d, w=%d, h=%d)\n", crtc->name, x, y, w, h);
 
 	return 0;
 }
 EXPORT_SYMBOL_GPL(exynos_drm_drv_set_lhbm_hist);
+
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+int exynos_drm_drv_set_lhbm_hist_gs(struct decon_device *decon, int x, int y, int w, int h)
+{
+	struct histogram_channel_config *cfg;
+
+	if (!decon || !decon->dqe)
+		return -EIO;
+	cfg = &decon->dqe->lhbm_hist_config;
+
+	exynos_drm_drv_set_lhbm_hist_helper(cfg, x, y, w, h);
+	pr_debug("%s: set lhbm histogram config (x=%d, y=%d, w=%d, h=%d)\n", decon->crtc->base.name,
+		 x, y, w, h);
+	decon->dqe->lhbm_hist_configured = true;
+
+	return 0;
+}
+#endif
 
 int exynos_drm_drv_get_lhbm_gray_level(struct exynos_drm_connector *conn)
 {

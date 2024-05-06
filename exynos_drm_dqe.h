@@ -172,6 +172,7 @@ struct exynos_dqe {
 	struct exynos_atc force_atc_config;
 	u32 lpd_atc_regs[LPD_ATC_REG_CNT];
 	struct histogram_channel_config lhbm_hist_config;
+	bool lhbm_hist_configured;
 	int lhbm_gray_level;
 };
 

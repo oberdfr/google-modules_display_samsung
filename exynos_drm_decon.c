@@ -724,12 +724,70 @@ static int decon_atomic_check(struct exynos_drm_crtc *exynos_crtc,
 	return ret;
 }
 
-static void decon_atomic_begin(struct exynos_drm_crtc *crtc)
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+/**
+ * Calculates ROI components based on screen size parameters
+ * @w: width of screen, in pixels
+ * @h: height of screen, in pixels
+ * @d: depth of ROI center point, in pixels
+ * @r: radius of ROI, in pixels
+ * @x: output parameter: top left x coordinate, in pixels
+ * @y: output parameter: top left y coordinate, in pixels
+ * @side_len: output parameter: side length of ROI rectangle, in pixels
+ */
+static void decon_calc_hist_roi(int w, int h, int d, int r, int *x, int *y, int *side_len)
+{
+	/* calculate ROI rectangle side length (square inscribed in lhbm circle) */
+	int half_side_len = mult_frac(r, 1000, 1414);
+
+	*x = (w / 2) - half_side_len;
+	*y = (h / 2) + d - half_side_len;
+	*side_len = 2 * half_side_len;
+}
+
+static int decon_update_lhbm_hist_roi(struct decon_device *decon, struct drm_atomic_state *state)
+{
+	struct drm_crtc_state *old_crtc_state, *new_crtc_state;
+	struct gs_drm_connector_state *old_gs_connector_state, *new_gs_connector_state;
+
+	old_crtc_state = drm_atomic_get_old_crtc_state(state, &decon->crtc->base);
+	new_crtc_state = drm_atomic_get_new_crtc_state(state, &decon->crtc->base);
+	if (!old_crtc_state || !new_crtc_state)
+		return 0;
+
+	old_gs_connector_state = crtc_get_gs_connector_state(state, old_crtc_state);
+	new_gs_connector_state = crtc_get_gs_connector_state(state, new_crtc_state);
+	if (!old_gs_connector_state || !new_gs_connector_state)
+		return 0;
+
+	/* update if initial (zero-value data), or if config changed */
+	if ((decon->dqe && !decon->dqe->lhbm_hist_configured &&
+	     new_gs_connector_state->lhbm_hist_data.enabled) ||
+	    gs_drm_connector_hist_data_needs_configure(old_gs_connector_state,
+						       new_gs_connector_state)) {
+		struct gs_drm_connector_lhbm_hist_data *hist_data;
+		int w, h, x, y, side_len;
+
+		hist_data = &new_gs_connector_state->lhbm_hist_data;
+		w = new_crtc_state->mode.hdisplay;
+		h = new_crtc_state->mode.vdisplay;
+		decon_calc_hist_roi(w, h, hist_data->d, hist_data->r, &x, &y, &side_len);
+		return exynos_drm_drv_set_lhbm_hist_gs(decon, x, y, side_len, side_len);
+	}
+
+	return 0;
+}
+#endif
+
+static void decon_atomic_begin(struct exynos_drm_crtc *crtc, struct drm_atomic_state *state)
 {
 	struct decon_device *decon = crtc->ctx;
 
 	decon_debug(decon, "%s +\n", __func__);
 	DPU_EVENT_LOG(DPU_EVT_ATOMIC_BEGIN, decon->id, NULL);
+#if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
+	decon_update_lhbm_hist_roi(decon, state);
+#endif
 	decon_reg_wait_update_done_and_mask(decon->id, &decon->config.mode,
 			SHADOW_UPDATE_TIMEOUT_US);
 	decon_debug(decon, "%s -\n", __func__);
