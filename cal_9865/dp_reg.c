@@ -231,14 +231,6 @@ static void dpphytca_reg_set_tcpc(u32 mux_control, u32 orientation,
 		      dp_phy_tca_read(SST1, TCA_REG_TCA_TCPC));
 }
 
-static void dpphytca_reg_set_tcpc_valid(void)
-{
-	u32 val = readl(regs_dp[REGS_PHY_TCA][SST1].regs + TCA_REG_TCA_TCPC);
-
-	dp_phy_tca_write(SST1, TCA_REG_TCA_TCPC,
-			 val & TCA_REG_TCPC_VALID_SET(VALID_I));
-}
-
 /* USBDP PHY Common Registers */
 static void dpphy_reg_set_cr_clk_high(void)
 {
@@ -526,26 +518,28 @@ static void dpphy_reg_set_config11_tx_pstate(u32 en, enum lane_usage lane)
 
 static void dpphy_reg_wait_config12_tx_ack(enum lane_usage lane)
 {
+	u32 ack_val = (lane == DP_USE_4_LANES) ? 0xF : 0x3;
 	u32 val = 0;
 
 	if (readl_poll_timeout_atomic(regs_dp[REGS_PHY][SST1].regs + DP_CONFIG12,
-				      val, !DP_TX_ACK_GET(val), 10, 2000)) {
+				val, !(DP_TX_ACK_GET(val) & ack_val), 10, 2000)) {
 		cal_log_err(0, "is timeout. Fail to ack DP TX.\n");
 		cal_log_err(0, "val(0x%08x) DP_CONFIG12 read:0x%08x\n", val,
 			    readl(regs_dp[REGS_PHY][SST1].regs + DP_CONFIG12));
 	}
 }
 
-static void dpphy_reg_set_config12_status_update(void)
+static void dpphy_reg_set_config12_status_update(enum lane_usage lane)
 {
+	u32 req_val = (lane == DP_USE_4_LANES) ? 0xF : 0x3;
 	u32 val = 0;
 
 	/* Set DP TX Request */
-	dp_phy_write_mask(SST1, DP_CONFIG12, DP_TX_REQ_SET_4LANES, DP_TX_REQ_MASK);
+	dp_phy_write_mask(SST1, DP_CONFIG12, DP_TX_REQ_SET(req_val), DP_TX_REQ_MASK);
 
 	/* Wait for DP TX Request Clear */
 	if (readl_poll_timeout_atomic(regs_dp[REGS_PHY][SST1].regs + DP_CONFIG12,
-				      val, !DP_TX_REQ_GET(val), 10, 2000)) {
+				val, !(DP_TX_REQ_GET(val) & req_val), 10, 2000)) {
 		cal_log_err(0, "is timeout. Fail to request DP TX update.\n");
 		cal_log_err(0, "val(0x%08x) DP_CONFIG12 read:0x%08x\n", val,
 			    readl(regs_dp[REGS_PHY][SST1].regs + DP_CONFIG12));
@@ -685,43 +679,42 @@ static void dpphy_reg_reset_tx_lanes(void)
 {
 	// Assert all TX lanes reset
 	dpphy_reg_set_config13_tx_reset(1);
-	dpphy_reg_set_config13_tx_enable(0, DP_USE_4_LANES);
-	cal_log_debug(0, "disable all lanes.\n");
 
 	// Disable all TX lanes' power state: P2
 	dpphy_reg_set_config11_tx_pstate(0, DP_USE_4_LANES);
-	cal_log_debug(0, "power off for all lanes.\n");
-
-	// Set TCA_TCPC Valid
-	dpphytca_reg_set_tcpc_valid();
-
-	// Wait at least 10us
-	udelay(12);
+	cal_log_debug(0, "power off all lanes.\n");
 
 	// De-Assert all TX lanes reset
 	dpphy_reg_set_config13_tx_reset(0);
 
+	// Disable all TX lanes
+	dpphy_reg_set_config13_tx_enable(0, DP_USE_4_LANES);
+	cal_log_debug(0, "disable all lanes.\n");
+
 	// Wait TX_ACK De-Assert
 	dpphy_reg_wait_config12_tx_ack(DP_USE_4_LANES);
+
+	// Assert DP Alt-mode Disable ACK
+	dpphy_reg_set_config19_dpalt_disable_ack(1);
 }
 
-static void dpphy_reg_reset_mpllb(u32 en)
+static void dpphy_reg_reset_mpllb(u32 en, enum lane_usage num_lane)
 {
 	if (en) {
 		// Assert USBDP PHY MPLLB reset
-		dpphy_reg_set_config12_tx_mpllb_en(0, DP_USE_4_LANES);
-		dpphy_reg_set_config11_tx_pstate(0, DP_USE_4_LANES);
-		cal_log_debug(0, "disable mpllb and power off for all lanes\n");
+		dpphy_reg_set_config12_tx_mpllb_en(0, num_lane);
+		dpphy_reg_set_config11_tx_pstate(0, num_lane);
+		cal_log_debug(0, "disable mpllb and power off for %d lanes\n", num_lane);
 	} else {
 		// De-assert USBDP PHY MPLLB reset
-		dpphy_reg_set_config12_tx_mpllb_en(1, DP_USE_4_LANES);
-		dpphy_reg_set_config11_tx_pstate(1, DP_USE_4_LANES);
-		cal_log_debug(0, "enable mpllb and power on for all lanes\n");
+		dpphy_reg_set_config12_tx_mpllb_en(1, num_lane);
+		dpphy_reg_set_config11_tx_pstate(1, num_lane);
+		cal_log_debug(0, "enable mpllb and power on for %d lanes\n", num_lane);
 	}
 
 	// Request to update TX status
-	dpphy_reg_set_config12_status_update();
-	cal_log_debug(0, "status update for all lanes.\n");
+	dpphy_reg_set_config12_status_update(num_lane);
+	cal_log_debug(0, "status update for %d lanes.\n", num_lane);
 }
 
 static void dpphy_reg_set_mpllb(struct dp_hw_config *hw_config, bool reconfig)
@@ -822,11 +815,6 @@ static void dpphy_reg_set_mpllb(struct dp_hw_config *hw_config, bool reconfig)
 		break;
 	}
 
-	if (reconfig) {
-		// Assert MPLLB Reset
-		dpphy_reg_reset_mpllb(1);
-	}
-
 	// Configure Master PLL-B for DP
 	dpphy_reg_set_config1(mpllb_cp_int, mpllb_cp_int_gs, mpllb_cp_prop,
 			      mpllb_cp_prop_gs);
@@ -841,11 +829,6 @@ static void dpphy_reg_set_mpllb(struct dp_hw_config *hw_config, bool reconfig)
 	dpphy_reg_set_config6(mpllb_ssc_stepsize);
 	dpphy_reg_set_config7(mpllb_ssc_up_spread, mpllb_tx_clk_div, mpllb_v2i,
 			      mpllb_word_div2_en);
-
-	if (reconfig) {
-		// De-assert MPLLB Reset
-		dpphy_reg_reset_mpllb(0);
-	}
 
 	// Configure Reference Clock for DP
 	dpphy_reg_set_config7_refclk_en(ref_clk_en);
@@ -917,33 +900,32 @@ static int dpphy_reg_switch_to_dp(enum lane_usage num_lane)
 
 static void dpphy_reg_set_lanes(struct dp_hw_config *hw_config, enum lane_usage num_lane)
 {
-	dpphy_reg_set_config12_tx_width(1, num_lane);
-	dpphy_reg_set_config12_tx_mpllb_en(1, num_lane);
-	dpphy_reg_set_config11_tx_pstate(1, num_lane);
-	cal_log_debug(0, "enable mpllb/power for %d lanes.\n", num_lane);
-
-	dpphy_reg_set_config12_status_update();
-	cal_log_debug(0, "status update for all lanes.\n");
-
-	if (hw_config->link_rate > LINK_RATE_RBR) {
-		/*
-		 * Disable the bypassing AC capacitor for HBRx mode only.
-		 * RBR mode is using the bypassing AC capacitor as default.
-		 */
-		dpphy_reg_set_config17_dcc_byp_ac_cap(0, num_lane);
-	}
-
+	// Enable TX lanes
 	dpphy_reg_set_config13_tx_enable(1, num_lane);
 	cal_log_debug(0, "enable %d lanes.\n", num_lane);
+
+	// De-assert DP Alt-mode Disable ACK
+	dpphy_reg_set_config19_dpalt_disable_ack(0);
+
+	// Update TX Width & Enable TX MPLLB
+	dpphy_reg_set_config12_tx_width(1, num_lane);
+	dpphy_reg_set_config12_tx_mpllb_en(1, num_lane);
+	cal_log_debug(0, "enable mpllb for %d lanes.\n", num_lane);
+
+	dpphy_reg_set_config12_status_update(num_lane);
+	cal_log_debug(0, "status update for %d lanes.\n", num_lane);
 }
 
 static int dpphy_reg_init(struct dp_hw_config *hw_config, bool reconfig)
 {
 	int ret;
-	enum lane_usage num_lane = DP_USE_0_LANES;
+	enum lane_usage num_lane = dp_get_and_inform_lanes(hw_config);
 
 	//dpphy_reg_usbdrd_qch_en(1);
 	cal_log_debug(0, "dpphy_reg_usbdrd_qch_en is skipped.\n");
+
+	if (reconfig)
+		dpphy_reg_reset_mpllb(1, num_lane);
 
 	/* Enable AUX channel */
 	dpphy_reg_set_aux_enable(1);
@@ -953,9 +935,6 @@ static int dpphy_reg_init(struct dp_hw_config *hw_config, bool reconfig)
 	dpphy_reg_reset_tx_lanes();
 	cal_log_debug(0, "reset All DP TX lanes.\n");
 
-	/* Assert DP Alt-mode Disable ACK */
-	dpphy_reg_set_config19_dpalt_disable_ack(1);
-
 	/* CP(Charge Pump) Bias Boosting X2 */
 	if (hw_config->phy_boost && !reconfig)
 		dpphy_reg_enable_cp_current_boost();
@@ -963,9 +942,6 @@ static int dpphy_reg_init(struct dp_hw_config *hw_config, bool reconfig)
 	/* Set Master PLL-B for DP as Link_BW */
 	dpphy_reg_set_mpllb(hw_config, reconfig);
 	cal_log_debug(0, "set MPLLB as link_bw.\n");
-
-	/* Get DP TX lanes and Inform it to USB */
-	num_lane = dp_get_and_inform_lanes(hw_config);
 
 	/* Switch from USB to DP */
 	ret = dpphy_reg_switch_to_dp(num_lane);
@@ -977,8 +953,8 @@ static int dpphy_reg_init(struct dp_hw_config *hw_config, bool reconfig)
 	dpphy_reg_set_lanes(hw_config, num_lane);
 	cal_log_debug(0, "set DP TX lanes.\n");
 
-	/* De-assert DP Alt-mode Disable ACK */
-	dpphy_reg_set_config19_dpalt_disable_ack(0);
+	if (reconfig)
+		dpphy_reg_reset_mpllb(0, num_lane);
 
 	return 0;
 }
@@ -1511,6 +1487,22 @@ static void dp_hw_set_data_path(struct dp_hw_config *hw_config)
 
 	// SNPS PHY Clock Enable
 	dp_reg_set_snps_tx_clk_en(num_lane);
+
+	// Power on TX lanes
+	dpphy_reg_set_config11_tx_pstate(1, num_lane);
+	cal_log_debug(0, "power on %d lanes.\n", num_lane);
+
+	dpphy_reg_set_config12_status_update(num_lane);
+	cal_log_debug(0, "status update for %d lanes.\n", num_lane);
+
+	// Adjust DCC Bypassing AC Capacitor
+	if (hw_config->link_rate > LINK_RATE_RBR) {
+		/*
+		 * Disable the bypassing AC capacitor for HBRx mode only.
+		 * RBR mode is using the bypassing AC capacitor as default.
+		 */
+		dpphy_reg_set_config17_dcc_byp_ac_cap(0, num_lane);
+	}
 
 	// SNPS PHY Data Enable
 	dp_reg_set_snps_tx_data_en(num_lane);
