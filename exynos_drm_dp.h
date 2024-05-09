@@ -222,6 +222,8 @@ struct dp_device {
 
 	bool hdcp_and_audio_enabled;
 
+	bool restart_pending;
+
 	/* DP stats/error counters */
 	struct dp_stats_counters stats;
 };
