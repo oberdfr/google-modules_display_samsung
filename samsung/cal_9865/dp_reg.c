@@ -2622,77 +2622,25 @@ void dp_hw_set_voltage_and_pre_emphasis(struct dp_hw_config *hw_config,
 
 	switch (hw_config->pin_type) {
 	case PIN_TYPE_A:
-		if (hw_config->orient_type == PLUG_NORMAL) {
-			dpphy_reg_set_lane_tx_level(link_rate, 0, voltage[1],
-						    pre_emphasis[1]);
-			dpphy_reg_set_lane_tx_level(link_rate, 1, voltage[2],
-						    pre_emphasis[2]);
-			dpphy_reg_set_lane_tx_level(link_rate, 2, voltage[3],
-						    pre_emphasis[3]);
-			dpphy_reg_set_lane_tx_level(link_rate, 3, voltage[0],
-						    pre_emphasis[0]);
-		} else {
-			dpphy_reg_set_lane_tx_level(link_rate, 0, voltage[0],
-						    pre_emphasis[0]);
-			dpphy_reg_set_lane_tx_level(link_rate, 1, voltage[3],
-						    pre_emphasis[3]);
-			dpphy_reg_set_lane_tx_level(link_rate, 2, voltage[2],
-						    pre_emphasis[2]);
-			dpphy_reg_set_lane_tx_level(link_rate, 3, voltage[1],
-						    pre_emphasis[1]);
-		}
+	case PIN_TYPE_C:
+	case PIN_TYPE_E:
+		dpphy_reg_set_lane_tx_level(link_rate, 0, voltage[0],
+					    pre_emphasis[0]);
+		dpphy_reg_set_lane_tx_level(link_rate, 1, voltage[1],
+					    pre_emphasis[1]);
+		dpphy_reg_set_lane_tx_level(link_rate, 2, voltage[2],
+					    pre_emphasis[2]);
+		dpphy_reg_set_lane_tx_level(link_rate, 3, voltage[3],
+					    pre_emphasis[3]);
 		break;
 
 	case PIN_TYPE_B:
-		if (hw_config->orient_type == PLUG_NORMAL) {
-			dpphy_reg_set_lane_tx_level(link_rate, 2, voltage[0],
-						    pre_emphasis[0]);
-			dpphy_reg_set_lane_tx_level(link_rate, 3, voltage[1],
-						    pre_emphasis[1]);
-		} else {
-			dpphy_reg_set_lane_tx_level(link_rate, 0, voltage[1],
-						    pre_emphasis[1]);
-			dpphy_reg_set_lane_tx_level(link_rate, 1, voltage[0],
-						    pre_emphasis[0]);
-		}
-		break;
-
-	case PIN_TYPE_C:
-	case PIN_TYPE_E:
-		if (hw_config->orient_type == PLUG_NORMAL) {
-			dpphy_reg_set_lane_tx_level(link_rate, 0, voltage[2],
-						    pre_emphasis[2]);
-			dpphy_reg_set_lane_tx_level(link_rate, 1, voltage[3],
-						    pre_emphasis[3]);
-			dpphy_reg_set_lane_tx_level(link_rate, 2, voltage[1],
-						    pre_emphasis[1]);
-			dpphy_reg_set_lane_tx_level(link_rate, 3, voltage[0],
-						    pre_emphasis[0]);
-		} else {
-			dpphy_reg_set_lane_tx_level(link_rate, 0, voltage[0],
-						    pre_emphasis[0]);
-			dpphy_reg_set_lane_tx_level(link_rate, 1, voltage[1],
-						    pre_emphasis[1]);
-			dpphy_reg_set_lane_tx_level(link_rate, 2, voltage[3],
-						    pre_emphasis[3]);
-			dpphy_reg_set_lane_tx_level(link_rate, 3, voltage[2],
-						    pre_emphasis[2]);
-		}
-		break;
-
 	case PIN_TYPE_D:
 	case PIN_TYPE_F:
-		if (hw_config->orient_type == PLUG_NORMAL) {
-			dpphy_reg_set_lane_tx_level(link_rate, 2, voltage[1],
-						    pre_emphasis[1]);
-			dpphy_reg_set_lane_tx_level(link_rate, 3, voltage[0],
-						    pre_emphasis[0]);
-		} else {
-			dpphy_reg_set_lane_tx_level(link_rate, 0, voltage[0],
-						    pre_emphasis[0]);
-			dpphy_reg_set_lane_tx_level(link_rate, 1, voltage[1],
-						    pre_emphasis[1]);
-		}
+		dpphy_reg_set_lane_tx_level(link_rate, 0, voltage[0],
+					    pre_emphasis[0]);
+		dpphy_reg_set_lane_tx_level(link_rate, 1, voltage[1],
+					    pre_emphasis[1]);
 		break;
 
 	default:
