@@ -18,6 +18,7 @@
 #include <linux/of_address.h>
 #include <linux/irq.h>
 #include <linux/hdmi.h>
+#include <linux/reboot.h>
 #include <video/videomode.h>
 
 #include <drm/display/drm_hdcp_helper.h>
@@ -1292,6 +1293,11 @@ static void dp_enable(struct drm_encoder *encoder)
 {
 	struct dp_device *dp = encoder_to_dp(encoder);
 
+	if (dp->restart_pending) {
+		dp_debug(dp, "%s: ignored, because of restart_pending", __func__);
+		return;
+	}
+
 	mutex_lock(&dp->cmd_lock);
 
 	dp->hw_config.bpc = dp_get_bpc(dp);
@@ -1340,6 +1346,11 @@ static void dp_enable(struct drm_encoder *encoder)
 static void dp_disable(struct drm_encoder *encoder)
 {
 	struct dp_device *dp = encoder_to_dp(encoder);
+
+	if (dp->restart_pending) {
+		dp_debug(dp, "%s: ignored, because of restart_pending", __func__);
+		return;
+	}
 
 	if (!pm_runtime_get_if_in_use(dp->dev)) {
 		dp_debug(dp, "%s: DP is already disabled\n", __func__);
@@ -1860,6 +1871,11 @@ static void dp_work_hpd(enum hotplug_state state)
 	enum link_training_status link_status = LINK_TRAINING_UNKNOWN;
 	int ret;
 
+	if (dp->restart_pending) {
+		dp_debug(dp, "%s: ignored, because of restart_pending", __func__);
+		return;
+	}
+
 	mutex_lock(&dp->hpd_lock);
 
 	if (state == EXYNOS_HPD_PLUG) {
@@ -1993,6 +2009,11 @@ static void dp_work_hpd_irq(struct work_struct *work)
 	u8 sink_count;
 	u8 irq = 0, irq2 = 0, irq3 = 0;
 	u8 link_status[DP_LINK_STATUS_SIZE];
+
+	if (dp->restart_pending) {
+		dp_debug(dp, "%s: ignored, because of restart_pending", __func__);
+		return;
+	}
 
 	mutex_lock(&dp->hpd_lock);
 	dp_info(dp, "[HPD_IRQ start]\n");
@@ -3052,6 +3073,20 @@ static const struct attribute_group dp_stats_group = {
 	.attrs = dp_stats_attrs,
 };
 
+static int dp_reboot_handler(struct notifier_block *nb, unsigned long state, void *data)
+{
+	struct dp_device *dp = get_dp_drvdata();
+
+	dp_disable(&dp->encoder);
+	dp->restart_pending = true;
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block dp_reboot_block = {
+	.notifier_call = dp_reboot_handler,
+};
+
 static int dp_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -3121,6 +3156,7 @@ static int dp_probe(struct platform_device *pdev)
 	INIT_WORK(&dp->hpd_irq_work, dp_work_hpd_irq);
 
 	pm_runtime_enable(dev);
+	register_reboot_notifier(&dp_reboot_block);
 
 	/* Register callback to HDCP */
 	dp_register_func_for_hdcp22(dp_hdcp_update_cp, dp_dpcd_read_for_hdcp22,
@@ -3140,6 +3176,7 @@ static int dp_remove(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct dp_device *dp = platform_get_drvdata(pdev);
 
+	unregister_reboot_notifier(&dp_reboot_block);
 	pm_runtime_disable(&pdev->dev);
 
 	mutex_destroy(&dp->cmd_lock);
