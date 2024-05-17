@@ -427,8 +427,9 @@ static void update_dsi_config_from_gs_connector(struct decon_config *config,
 		config->dsc.dsc_count = gs_mode->dsc.dsc_count;
 		config->dsc.slice_count = gs_mode->dsc.cfg->slice_count;
 		config->dsc.slice_height = gs_mode->dsc.cfg->slice_height;
-		config->dsc.slice_width = DIV_ROUND_UP(config->image_width,
-						       config->dsc.slice_count);
+		config->dsc.slice_width = DIV_ROUND_UP(
+			config->image_width / (config->mode.dsi_mode == DSI_MODE_DUAL_DSI ? 2 : 1),
+			config->dsc.slice_count);
 		config->dsc.cfg = gs_mode->dsc.cfg;
 	}
 
