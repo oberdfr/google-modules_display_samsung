@@ -1666,6 +1666,8 @@ static ssize_t panel_idle_store(struct device *dev, struct device_attribute *att
 {
 	const struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
 	struct exynos_panel *ctx = mipi_dsi_get_drvdata(dsi);
+	char str_trace[] = "panel_idle_store_0";
+	u8 idx_str_en = strlen(str_trace) - 1;
 	bool idle_enabled;
 	int ret;
 
@@ -1675,6 +1677,8 @@ static ssize_t panel_idle_store(struct device *dev, struct device_attribute *att
 		return ret;
 	}
 
+	str_trace[idx_str_en] = idle_enabled ? '1' : '0';
+	DPU_ATRACE_BEGIN(str_trace);
 	mutex_lock(&ctx->mode_lock);
 	if (idle_enabled != ctx->panel_idle_enabled) {
 		ctx->panel_idle_enabled = idle_enabled;
@@ -1685,6 +1689,7 @@ static ssize_t panel_idle_store(struct device *dev, struct device_attribute *att
 		panel_update_idle_mode_locked(ctx, true);
 	}
 	mutex_unlock(&ctx->mode_lock);
+	DPU_ATRACE_END(str_trace);
 
 	return count;
 }
@@ -1741,12 +1746,14 @@ static ssize_t min_vrefresh_store(struct device *dev, struct device_attribute *a
 		return ret;
 	}
 
+	DPU_ATRACE_BEGIN(__func__);
 	mutex_lock(&ctx->mode_lock);
 	if (ctx->min_vrefresh != min_vrefresh) {
 		ctx->min_vrefresh = min_vrefresh;
 		panel_update_idle_mode_locked(ctx, true);
 	}
 	mutex_unlock(&ctx->mode_lock);
+	DPU_ATRACE_END(__func__);
 
 	return count;
 }
@@ -1773,12 +1780,14 @@ static ssize_t idle_delay_ms_store(struct device *dev, struct device_attribute *
 		return ret;
 	}
 
+	DPU_ATRACE_BEGIN(__func__);
 	mutex_lock(&ctx->mode_lock);
 	if (ctx->idle_delay_ms != idle_delay_ms) {
 		ctx->idle_delay_ms = idle_delay_ms;
 		panel_update_idle_mode_locked(ctx, true);
 	}
 	mutex_unlock(&ctx->mode_lock);
+	DPU_ATRACE_END(__func__);
 
 	return count;
 }
