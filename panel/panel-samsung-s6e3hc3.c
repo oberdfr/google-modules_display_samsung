@@ -343,14 +343,14 @@ static void s6e3hc3_update_te2(struct exynos_panel *ctx)
 		ctx->panel_idle_vrefresh ? "active" : "inactive",
 		width[1], width[2], width[3], width[4], width[5], width[6]);
 
-	EXYNOS_DCS_WRITE_SEQ(ctx, 0xF0, 0x5A, 0x5A);
-	EXYNOS_DCS_WRITE_SEQ(ctx, 0xB0, 0x00, 0x4F, 0xF2);
-	EXYNOS_DCS_WRITE_SEQ(ctx, 0xF2, 0x0D);
-	EXYNOS_DCS_WRITE_SEQ(ctx, 0xB0, 0x00, 0x01, 0xB9);
-	EXYNOS_DCS_WRITE_SEQ(ctx, 0xB9, option);
-	EXYNOS_DCS_WRITE_SEQ(ctx, 0xB0, 0x00, 0x14, 0xB9);
-	EXYNOS_DCS_WRITE_TABLE(ctx, width);
-	EXYNOS_DCS_WRITE_SEQ(ctx, 0xF0, 0xA5, 0xA5);
+	EXYNOS_DCS_BUF_ADD_SET(ctx, unlock_cmd_f0);
+	EXYNOS_DCS_BUF_ADD(ctx, 0xB0, 0x00, 0x4F, 0xF2);
+	EXYNOS_DCS_BUF_ADD(ctx, 0xF2, 0x0D);
+	EXYNOS_DCS_BUF_ADD(ctx, 0xB0, 0x00, 0x01, 0xB9);
+	EXYNOS_DCS_BUF_ADD(ctx, 0xB9, option);
+	EXYNOS_DCS_BUF_ADD(ctx, 0xB0, 0x00, 0x14, 0xB9);
+	EXYNOS_DCS_BUF_ADD_SET(ctx, width);
+	EXYNOS_DCS_BUF_ADD_SET_AND_FLUSH(ctx, lock_cmd_f0);
 }
 
 static inline bool is_auto_mode_preferred(struct exynos_panel *ctx)
