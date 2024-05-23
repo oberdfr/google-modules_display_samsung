@@ -2250,6 +2250,7 @@ static void __dsim_cmd_write_locked(struct dsim_device *dsim, const struct mipi_
 {
 	WARN_ON(!mutex_is_locked(&dsim->cmd_lock));
 
+	DPU_ATRACE_BEGIN(__func__);
 	if (packet->payload_length > 0)
 		dsim_write_payload(dsim, packet->payload, packet->payload_length);
 	dsim_reg_wr_tx_header(dsim->id, packet->header[0], packet->header[1], packet->header[2],
@@ -2258,11 +2259,13 @@ static void __dsim_cmd_write_locked(struct dsim_device *dsim, const struct mipi_
 	dsim_debug(dsim, "header(0x%x 0x%x 0x%x) size(%lu) ph fifo(%d)\n", packet->header[0],
 		   packet->header[1], packet->header[2], packet->size,
 		   dsim_reg_get_ph_cnt(dsim->id));
+	DPU_ATRACE_END(__func__);
 }
 
 static void dsim_cmd_packetgo_queue_locked(struct dsim_device *dsim,
 					   const struct mipi_dsi_packet *packet)
 {
+	DPU_ATRACE_BEGIN(__func__);
 	/* if this is the first packet being queued, enable packet go feature */
 	if (!dsim->total_pend_ph)
 		__dsim_cmd_packetgo_enable_locked(dsim, true);
@@ -2274,6 +2277,7 @@ static void dsim_cmd_packetgo_queue_locked(struct dsim_device *dsim,
 
 	dsim_debug(dsim, "total pending packet header(%u) payload(%u)\n", dsim->total_pend_ph,
 		   dsim->total_pend_pl);
+	DPU_ATRACE_END(__func__);
 }
 
 static void __dsim_cmd_prepare(struct dsim_device *dsim)
@@ -2472,7 +2476,10 @@ static int dsim_write_data_locked(struct dsim_device *dsim, const struct mipi_ds
 	}
 
 trace_dsi_cmd:
+
+	DPU_ATRACE_BEGIN("dsim_dump_cmd");
 	dsim_dump_cmd(dsim, msg, is_last);
+	DPU_ATRACE_END("dsim_dump_cmd");
 	/* TODO(b/278175371): print actual delay time */
 	trace_dsi_tx(msg->type, msg->tx_buf, msg->tx_len, is_last, dsim->tx_delay_ms);
 	dsim_debug(dsim, "%s last command\n", is_last ? "" : "Not");
