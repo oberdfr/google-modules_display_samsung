@@ -1187,7 +1187,7 @@ static inline bool is_vrr_mode(const struct exynos_panel_mode *pmode)
 	ret = exynos_dcs_write_delay(ctx, d, ARRAY_SIZE(d), delay);	\
 	if (ret < 0)							\
 		EXYNOS_DCS_WRITE_PRINT_ERR(ctx, d, ARRAY_SIZE(d), ret);	\
-	else								\
+	else if (delay > 0)						\
 		usleep_range(delay * 1000, delay * 1000 + 10);		\
 } while (0)
 
@@ -1207,7 +1207,7 @@ static inline bool is_vrr_mode(const struct exynos_panel_mode *pmode)
 	ret = exynos_dcs_write_delay(ctx, table, ARRAY_SIZE(table), delay);	\
 	if (ret < 0)								\
 		EXYNOS_DCS_WRITE_PRINT_ERR(ctx, table, ARRAY_SIZE(table), ret);	\
-	else									\
+	else if (delay > 0)							\
 		usleep_range(delay * 1000, delay * 1000 + 10);			\
 } while (0)
 
