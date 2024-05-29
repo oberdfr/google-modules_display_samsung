@@ -30,8 +30,17 @@
 #include <linux/soc/samsung/exynos-smc.h>
 #include <linux/dma-heap.h>
 
-#include <dt-bindings/soc/google/gs101-devfreq.h>
+#if IS_ENABLED(CONFIG_ARM_EXYNOS_DEVFREQ)
 #include <soc/google/exynos-devfreq.h>
+#if IS_ENABLED(CONFIG_SOC_GS101)
+#include <dt-bindings/soc/google/gs101-devfreq.h>
+#elif IS_ENABLED(CONFIG_SOC_GS201)
+#include <dt-bindings/soc/google/gs201-devfreq.h>
+#elif IS_ENABLED(CONFIG_SOC_ZUMA)
+#include <dt-bindings/soc/google/zuma-devfreq.h>
+#endif
+#endif
+
 
 #include <hdr_cal.h>
 #include <regs-dpp.h>
@@ -441,7 +450,11 @@ static void dpp_test_fixed_config_params(struct dpp_params_info *config, u32 w,
 	config->v_ratio = mult_frac(1 << 20, config->src.h, config->dst.h);
 
 	config->is_block = false;
+#if IS_ENABLED(CONFIG_ARM_EXYNOS_DEVFREQ)
 	config->rcv_num = exynos_devfreq_get_domain_freq(DEVFREQ_DISP) ? : 0x7FFFFFFF;
+#else
+	config->rcv_num = 0x7FFFFFFF;
+#endif
 }
 
 static int dpp_convert_plane_state_to_config(struct dpp_params_info *config,
@@ -594,7 +607,11 @@ static int dpp_convert_plane_state_to_config(struct dpp_params_info *config,
 	} else {
 		config->is_block = false;
 	}
+#if IS_ENABLED(CONFIG_ARM_EXYNOS_DEVFREQ)
 	config->rcv_num = exynos_devfreq_get_domain_freq(DEVFREQ_DISP) ? : 0x7FFFFFFF;
+#else
+	config->rcv_num = 0x7FFFFFFF;
+#endif
 
 	return 0;
 }
