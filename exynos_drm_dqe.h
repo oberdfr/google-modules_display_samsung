@@ -144,6 +144,24 @@ struct debugfs_dump {
 	void *priv;
 };
 
+/**
+ * dqe_gray_level_callback_data - data for updating connector gray level
+ *
+ * In environments where the connector may need information about the
+ * lhbm_gray_level by way of a custom callback, this holds the required data to
+ * register and execute that callback.
+ */
+struct dqe_gray_level_callback_data {
+	/**
+	 * @conn: handle for associated drm_connector
+	 */
+	struct drm_connector *conn;
+	/**
+	 * @update_gray_level_callback: callback that updates data on connector
+	 */
+	void (*update_gray_level_callback)(struct drm_connector *conn, int lhbm_gray_level);
+};
+
 struct exynos_dqe {
 	void __iomem *regs;
 	void __iomem *cgc_regs;
@@ -174,6 +192,7 @@ struct exynos_dqe {
 	struct histogram_channel_config lhbm_hist_config;
 	bool lhbm_hist_configured;
 	int lhbm_gray_level;
+	struct dqe_gray_level_callback_data gray_level_callback_data;
 };
 
 int histogram_request_ioctl(struct drm_device *drm_dev, void *data, struct drm_file *file);

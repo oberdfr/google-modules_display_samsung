@@ -760,6 +760,14 @@ static int decon_update_lhbm_hist_roi(struct decon_device *decon, struct drm_ato
 	if (!old_gs_connector_state || !new_gs_connector_state)
 		return 0;
 
+	if (decon->dqe) {
+		struct dqe_gray_level_callback_data *cb_data =
+			&decon->dqe->gray_level_callback_data;
+
+		cb_data->update_gray_level_callback = gs_drm_connector_update_gray_level_callback;
+		cb_data->conn = new_gs_connector_state->base.connector;
+	}
+
 	/* update if initial (zero-value data), or if config changed */
 	if ((decon->dqe && !decon->dqe->lhbm_hist_configured &&
 	     new_gs_connector_state->lhbm_hist_data.enabled) ||
@@ -1704,6 +1712,11 @@ static void decon_disable(struct exynos_drm_crtc *crtc)
 			decon->irq_te = -1;
 			decon->te_gpio = 0;
 		}
+	}
+
+	if (decon->dqe) {
+		decon->dqe->gray_level_callback_data.conn = NULL;
+		decon->dqe->gray_level_callback_data.update_gray_level_callback = NULL;
 	}
 
 	reset = _decon_wait_for_framedone(decon);

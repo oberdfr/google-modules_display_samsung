@@ -583,6 +583,7 @@ static void exynos_lhbm_histogram_callback(u32 dqe_id, enum exynos_histogram_id 
 	u32 i = 0, sum = 0;
 	u32 weighted_sum = 0;
 	struct decon_device *decon = get_decon_drvdata(dqe_id);
+	struct exynos_dqe *dqe = decon->dqe;
 
 	if (hist_id != HISTOGRAM_CHAN_LHBM)
 		return;
@@ -594,7 +595,11 @@ static void exynos_lhbm_histogram_callback(u32 dqe_id, enum exynos_histogram_id 
 	}
 	if (sum == 0)
 		return;
-	decon->dqe->lhbm_gray_level = weighted_sum / sum;
+	dqe->lhbm_gray_level = weighted_sum / sum;
+	if (dqe->gray_level_callback_data.update_gray_level_callback &&
+	    dqe->gray_level_callback_data.conn)
+		dqe->gray_level_callback_data.update_gray_level_callback(
+			dqe->gray_level_callback_data.conn, dqe->lhbm_gray_level);
 }
 
 static void exynos_lhbm_histogram_update(struct decon_device *decon)
