@@ -2257,11 +2257,35 @@ static ssize_t dphy_diag_reg_write(struct file *file, const char *user_buf,
 	uint32_t val;
 	struct seq_file *m = file->private_data;
 	struct dsim_dphy_diag *diag = m->private;
+	struct dsim_device *dsim = diag->private;
 
 	ret = kstrtou32_from_user(user_buf, count, 0, &val);
 	if (ret)
 		return ret;
 
+	/* config dphy of another dsim_device for dual dsi */
+	if (dsim->dual_dsi == DSIM_DUAL_DSI_MAIN) {
+		int i;
+		struct dsim_device *sec_dsi = NULL;
+		struct dsim_dphy_diag *sec_diag = NULL;
+
+		sec_dsi = exynos_get_dual_dsi(DSIM_DUAL_DSI_SEC);
+		if (sec_dsi) {
+			/* found the corresponding diag of second dsim device */
+			for (i = 0; i < sec_dsi->config.num_dphy_diags; ++i) {
+				if (!strcmp(sec_dsi->config.dphy_diags[i].name, diag->name)) {
+					sec_diag = &sec_dsi->config.dphy_diags[i];
+					break;
+				}
+			}
+
+			ret = dsim_dphy_diag_set_reg(sec_dsi, sec_diag, val);
+			if (ret)
+				return ret;
+		} else {
+			return -ENODEV;
+		}
+	}
 	ret = dsim_dphy_diag_set_reg(diag->private, diag, val);
 	if (ret)
 		return ret;
