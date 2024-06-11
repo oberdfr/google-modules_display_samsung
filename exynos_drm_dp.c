@@ -3156,6 +3156,7 @@ static int dp_probe(struct platform_device *pdev)
 	INIT_WORK(&dp->hpd_unplug_work, dp_work_hpd_unplug);
 	INIT_WORK(&dp->hpd_irq_work, dp_work_hpd_irq);
 
+	device_init_wakeup(dev, true);
 	pm_runtime_enable(dev);
 	register_reboot_notifier(&dp_reboot_block);
 
@@ -3179,6 +3180,7 @@ static int dp_remove(struct platform_device *pdev)
 
 	unregister_reboot_notifier(&dp_reboot_block);
 	pm_runtime_disable(&pdev->dev);
+	device_init_wakeup(dev, false);
 
 	mutex_destroy(&dp->cmd_lock);
 	mutex_destroy(&dp->hpd_lock);
