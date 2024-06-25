@@ -901,6 +901,16 @@ err:
 	return -EIO;
 }
 
+/* Increment stats counters based off DSC and FEC support */
+static void dp_stat_fec_dsc(struct dp_device *dp, bool dp_fec, bool dp_dsc)
+{
+	if (dp_fec && dp_dsc) {
+		dp->stats.fec_dsc_supported++;
+	} else {
+		dp->stats.fec_dsc_not_supported++;
+	}
+}
+
 static int dp_link_up(struct dp_device *dp)
 {
 	u8 dpcd[DP_RECEIVER_CAP_SIZE + 1];
@@ -998,6 +1008,9 @@ static int dp_link_up(struct dp_device *dp)
 	dp_info(dp, "DP Sink: DPCD_%X Rate(%d Mbps) Lanes(%u) EF(%d) SSC(%d) FEC(%d) DSC(%d)\n",
 		dp->sink.revision, dp->sink.link_rate / 100, dp->sink.num_lanes,
 		dp->sink.enhanced_frame, dp->sink.ssc, dp->sink.fec, dp->sink.dsc);
+
+	/* Stats check if FEC/DSC is supported */
+	dp_stat_fec_dsc(dp, dp->sink.fec, dp->sink.dsc);
 
 	/* Sanity-check the sink's max link rate */
 	if (dp->sink.link_rate != drm_dp_bw_code_to_link_rate(DP_LINK_BW_1_62) &&
@@ -3196,6 +3209,24 @@ static ssize_t max_res_other_show(struct device *dev, struct device_attribute *a
 }
 static DEVICE_ATTR_RO(max_res_other);
 
+/* FEC/DSC Support Sysfs */
+static ssize_t fec_dsc_supported_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct dp_device *dp = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n", dp->stats.fec_dsc_supported);
+}
+static DEVICE_ATTR_RO(fec_dsc_supported);
+
+static ssize_t fec_dsc_not_supported_show(struct device *dev, struct device_attribute *attr,
+					  char *buf)
+{
+	struct dp_device *dp = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n", dp->stats.fec_dsc_not_supported);
+}
+static DEVICE_ATTR_RO(fec_dsc_not_supported);
+
 static struct attribute *dp_stats_attrs[] = { &dev_attr_link_negotiation_failures.attr,
 					      &dev_attr_edid_read_failures.attr,
 					      &dev_attr_dpcd_read_failures.attr,
@@ -3213,6 +3244,8 @@ static struct attribute *dp_stats_attrs[] = { &dev_attr_link_negotiation_failure
 					      &dev_attr_max_res_5120_2880.attr,
 					      &dev_attr_max_res_7680_4320.attr,
 					      &dev_attr_max_res_other.attr,
+					      &dev_attr_fec_dsc_supported.attr,
+					      &dev_attr_fec_dsc_not_supported.attr,
 					      NULL };
 
 static const struct attribute_group dp_stats_group = {

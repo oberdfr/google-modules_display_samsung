@@ -167,6 +167,9 @@ struct dp_stats_counters {
 	u32 max_res_5120_2880;
 	u32 max_res_7680_4320;
 	u32 max_res_other;
+
+	u32 fec_dsc_supported;
+	u32 fec_dsc_not_supported;
 };
 
 /* DisplayPort Device */

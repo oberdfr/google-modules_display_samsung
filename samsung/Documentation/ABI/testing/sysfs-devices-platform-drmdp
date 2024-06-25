@@ -176,3 +176,19 @@ Contact:	"Carlos Rodriguez" <cjeremyrod@google.com>
 Description:
 		Used to count the number of times the display port was used with displays that have a max resolution that falls outside the current available options.
 		When the display's max resolution is not one of the other preset resolutions, this count will be increased.
+
+What:		/sys/devices/platform/110f0000.drmdp/drm-displayport-stats/fec_dsc_supported
+Date:		June 2024
+KernelVersion:	6.1
+Contact:	"Carlos Rodriguez" <cjeremyrod@google.com>
+Description:
+		Used to count the number of FEC/DSC supported monitors the device was plugged into.
+		If both FEC and DSC are supported this count will increase.
+
+What:		/sys/devices/platform/110f0000.drmdp/drm-displayport-stats/fec_dsc_not_supported
+Date:		June 2024
+KernelVersion:	6.1
+Contact:	"Carlos Rodriguez" <cjeremyrod@google.com>
+Description:
+		Used to count the number of FEC/DSC unsupported monitors the device was plugged into.
+		If either FEC and DSC are not supported this count will increase.
