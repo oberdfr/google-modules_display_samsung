@@ -4231,8 +4231,10 @@ static int exynos_panel_bridge_atomic_check(struct drm_bridge *bridge,
 		struct drm_display_mode *target_mode = &new_crtc_state->adjusted_mode;
 		int current_vrefresh = drm_mode_vrefresh(current_mode);
 		int target_vrefresh = drm_mode_vrefresh(target_mode);
-		int current_bts_fps = exynos_drm_mode_bts_fps(current_mode);
-		int target_bts_fps = exynos_drm_mode_bts_fps(target_mode);
+		int current_bts_fps = exynos_drm_mode_bts_fps(current_mode,
+			ctx->current_mode->exynos_mode.min_bts_fps);
+		int target_bts_fps = exynos_drm_mode_bts_fps(target_mode,
+			exynos_conn_state->exynos_mode.min_bts_fps);
 
 		int clock;
 
@@ -5710,7 +5712,8 @@ int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 	for (i = 0; i < ctx->desc->num_modes; i++) {
 		const struct exynos_panel_mode *pmode = &ctx->desc->modes[i];
 		const int vrefresh = drm_mode_vrefresh(&pmode->mode);
-		const int bts_fps = exynos_drm_mode_bts_fps(&pmode->mode);
+		const int bts_fps = exynos_drm_mode_bts_fps(&pmode->mode,
+			pmode->exynos_mode.min_bts_fps);
 
 		if (ctx->peak_vrefresh < vrefresh)
 			ctx->peak_vrefresh = vrefresh;

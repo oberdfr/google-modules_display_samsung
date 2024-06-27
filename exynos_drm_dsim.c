@@ -1154,7 +1154,8 @@ static void dsim_of_get_pll_diags(struct dsim_device * /* dsim */)
 
 static void _update_config_timing(struct dsim_reg_config *config,
 				  const struct drm_display_mode *mode, bool has_underrun_param,
-				  unsigned int te_idle_us, unsigned int te_var)
+				  unsigned int te_idle_us, unsigned int te_var,
+				  unsigned int min_bts_fps)
 {
 	struct dpu_panel_timing *p_timing = &config->p_timing;
 	struct videomode vm;
@@ -1172,7 +1173,8 @@ static void _update_config_timing(struct dsim_reg_config *config,
 	p_timing->hfp = vm.hfront_porch;
 	p_timing->hbp = vm.hback_porch;
 	p_timing->hsa = vm.hsync_len;
-	p_timing->vrefresh = exynos_drm_mode_bts_fps(mode);
+	p_timing->vrefresh = config->mode == DSIM_VIDEO_MODE ?
+		drm_mode_vrefresh(mode) : exynos_drm_mode_bts_fps(mode, min_bts_fps);
 	if (has_underrun_param) {
 		p_timing->te_idle_us = te_idle_us;
 		p_timing->te_var = te_var;
@@ -1220,7 +1222,7 @@ static void update_config_for_mode_exynos(struct dsim_reg_config *config,
 	unsigned int te_var = exynos_mode->underrun_param ? exynos_mode->underrun_param->te_var : 0;
 
 	_update_config_timing(config, mode, exynos_mode->underrun_param ? true : false, te_idle_us,
-			      te_var);
+			      te_var, exynos_mode->min_bts_fps);
 	_update_config_mode_flags(config, exynos_mode->mode_flags);
 	_update_config_dsc(config, exynos_mode->bpc, exynos_mode->dsc.enabled,
 			   exynos_mode->dsc.dsc_count, exynos_mode->dsc.slice_count,
@@ -1446,7 +1448,7 @@ static void update_config_for_mode_gs(struct dsim_reg_config *config,
 	unsigned int slice_height = 0;
 
 	_update_config_timing(config, mode, gs_mode->underrun_param ? true : false, te_idle_us,
-			      te_var);
+			      te_var, gs_mode->min_bts_fps);
 	_update_config_mode_flags(config, gs_mode->mode_flags);
 	if (gs_mode->dsc.cfg) {
 		slice_count = gs_mode->dsc.cfg->slice_count;
