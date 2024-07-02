@@ -3077,7 +3077,7 @@ static int dp_reboot_handler(struct notifier_block *nb, unsigned long state, voi
 {
 	struct dp_device *dp = get_dp_drvdata();
 
-	hdcp_dplink_connect_state(DP_DISCONNECT);
+	hdcp_dplink_connect_state(DP_SHUTDOWN);
 	dp_disable(&dp->encoder);
 	dp->restart_pending = true;
 
