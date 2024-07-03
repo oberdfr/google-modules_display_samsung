@@ -54,6 +54,11 @@ struct dsim_pll_features {
 	u32 k_bits;
 };
 
+struct dsim_allowed_hs_clks {
+	unsigned int num_clks;
+	u32 *hs_clks;
+};
+
 struct dsim_pll_params {
 	unsigned int num_modes;
 	struct dsim_pll_param **params;
@@ -90,6 +95,9 @@ struct dsim_device {
 	struct dsim_resources res;
 	struct clk **clks;
 	struct dsim_pll_params *pll_params;
+
+	struct dsim_allowed_hs_clks *allowed_hs_clks;
+	bool force_set_hs_clk;
 
 #ifdef CONFIG_DEBUG_FS
         struct dentry *debugfs_entry;

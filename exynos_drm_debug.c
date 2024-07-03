@@ -2341,6 +2341,7 @@ void dsim_diag_create_debugfs(struct dsim_device *dsim) {
 	}
 
 	debugfs_create_u32("state", 0400, dsim->debugfs_entry, &dsim->state);
+	debugfs_create_bool("force_set_hs_clk", 0600, dsim->debugfs_entry, &dsim->force_set_hs_clk);
 
 	if (dsim->config.num_dphy_diags == 0)
 		return;

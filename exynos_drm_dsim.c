@@ -757,6 +757,53 @@ static int dsim_of_parse_modes(struct device_node *entry,
 	return 0;
 }
 
+static struct dsim_allowed_hs_clks *dsim_of_get_allowed_hs_clks(struct dsim_device *dsim)
+{
+	struct device *dev = dsim->dev;
+	struct device_node *np;
+	struct dsim_allowed_hs_clks *clock_rates;
+
+	np = of_parse_phandle(dev->of_node, "clock_rates", 0);
+	if (!np) {
+		dsim_warn(dsim, "failed to get clock_rates\n");
+		return NULL;
+	}
+
+	clock_rates = devm_kzalloc(dsim->dev, sizeof(*clock_rates), GFP_KERNEL);
+	if (!clock_rates) {
+		of_node_put(np);
+		return NULL;
+	}
+
+	clock_rates->num_clks = of_property_count_u32_elems(np, "clock-rates");
+	if (clock_rates->num_clks <= 0) {
+		dsim_warn(dsim, "clock-rates empty\n");
+		goto read_node_fail;
+	}
+
+	clock_rates->hs_clks = devm_kzalloc(dsim->dev,
+				sizeof(u32) * clock_rates->num_clks, GFP_KERNEL);
+	if (!clock_rates->hs_clks)
+		goto read_node_fail;
+	if (of_property_read_u32_array(
+			np, "clock-rates", clock_rates->hs_clks, clock_rates->num_clks) < 0) {
+		dsim_err(dsim, "%s, failed to read clock-rates\n", __func__);
+		devm_kfree(dsim->dev, clock_rates->hs_clks);
+		goto read_node_fail;
+	}
+
+	for (int i = 0; i < clock_rates->num_clks; i++)
+		dsim_debug(dsim, "allowed clk #%d: %u\n", i, clock_rates->hs_clks[i]);
+
+	of_node_put(np);
+	return clock_rates;
+
+read_node_fail:
+	of_node_put(np);
+	devm_kfree(dsim->dev, clock_rates);
+	return NULL;
+}
+
 static struct dsim_pll_features *dsim_of_get_pll_features(
 		struct dsim_device *dsim, struct device_node *np)
 {
@@ -1888,6 +1935,7 @@ static int dsim_parse_dt(struct dsim_device *dsim)
 		return -ENODEV;
 	}
 
+	dsim->allowed_hs_clks = dsim_of_get_allowed_hs_clks(dsim);
 	dsim->pll_params = dsim_of_get_clock_mode(dsim);
 	dsim_of_get_pll_diags(dsim);
 
@@ -3018,6 +3066,23 @@ static ssize_t hs_clock_store(struct device *dev,
 
 	/* ddr hs_clock unit: MHz */
 	dsim_info(dsim, "%s: hs clock %u, apply now: %u\n", __func__, hs_clock, apply_now);
+
+	if (dsim->allowed_hs_clks && !dsim->force_set_hs_clk) {
+		bool hs_clock_allowed = false;
+
+		for (int i = 0; i < dsim->allowed_hs_clks->num_clks; i++) {
+			if (hs_clock == dsim->allowed_hs_clks->hs_clks[i]) {
+				hs_clock_allowed = true;
+				break;
+			}
+		}
+
+		if (!hs_clock_allowed) {
+			dsim_warn(dsim, "hs_clock=%u not in allowed_hs_clks\n", hs_clock);
+			rc = -EINVAL;
+			goto out;
+		}
+	}
 
 	if (dsim->state != DSIM_STATE_HSCLKEN) {
 		if (pll_param->pll_freq == hs_clock) {
