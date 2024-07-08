@@ -186,6 +186,8 @@ dsim_get_decon(const struct dsim_device *dsim)
 
 	if (dsim->dual_dsi == DSIM_DUAL_DSI_SEC) {
 		main_dsi = exynos_get_dual_dsi(DSIM_DUAL_DSI_MAIN);
+		if (!main_dsi)
+			return NULL;
 		crtc = main_dsi->encoder.crtc;
 	}
 
