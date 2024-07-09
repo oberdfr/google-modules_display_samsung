@@ -4388,6 +4388,7 @@ static void exynos_panel_bridge_disable(struct drm_bridge *bridge,
 			ctx->panel_state = PANEL_STATE_BLANK;
 		} else {
 			ctx->panel_state = PANEL_STATE_OFF;
+			ctx->mode_in_progress = MODE_DONE;
 
 			if (ctx->desc->exynos_panel_func &&
 			    ctx->desc->exynos_panel_func->run_normal_mode_work) {
