@@ -1992,6 +1992,7 @@ static irqreturn_t decon_irq_handler(int irq, void *dev_data)
 	}
 
 	if (irq_sts_reg & INT_PEND_DQE_DIMMING_START) {
+		DPU_ATRACE_INT_PID("dqe_dimming", 1, decon->thread->pid);
 		decon->keep_unmask = true;
 		if (decon->config.mode.op_mode == DECON_COMMAND_MODE)
 			decon_reg_set_trigger(decon->id, &decon->config.mode,
@@ -2001,6 +2002,7 @@ static irqreturn_t decon_irq_handler(int irq, void *dev_data)
 	}
 
 	if (irq_sts_reg & INT_PEND_DQE_DIMMING_END) {
+		DPU_ATRACE_INT_PID("dqe_dimming", 0, decon->thread->pid);
 		decon->keep_unmask = false;
 		if (!decon->event && decon->config.mode.op_mode == DECON_COMMAND_MODE)
 			decon_reg_set_trigger(decon->id, &decon->config.mode,
