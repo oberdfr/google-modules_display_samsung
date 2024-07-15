@@ -2241,6 +2241,35 @@ static ssize_t available_disp_stats_show(struct device *dev,
 	return len;
 }
 
+static ssize_t power_mode_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct mipi_dsi_device *dsi = to_mipi_dsi_device(dev);
+	struct exynos_panel *ctx = mipi_dsi_get_drvdata(dsi);
+	int err;
+	u8 power_mode;
+
+	if (!is_panel_active(ctx)) {
+		dev_warn(dev, "%s: panel is not enabled\n", __func__);
+		return -EPERM;
+	}
+
+	mutex_lock(&ctx->mode_lock);
+	err = mipi_dsi_dcs_read(dsi, MIPI_DCS_GET_POWER_MODE, &power_mode, sizeof(power_mode));
+	mutex_unlock(&ctx->mode_lock);
+	if (err <= 0) {
+		if (err == 0)
+			err = -ENODATA;
+		dev_warn(dev, "Unable to read power mode register (%#02x: %d)\n",
+			MIPI_DCS_GET_POWER_MODE, err);
+		return err;
+	}
+
+	power_mode &= (MIPI_DSI_DCS_POWER_MODE_DISPLAY |
+	    MIPI_DSI_DCS_POWER_MODE_NORMAL | MIPI_DSI_DCS_POWER_MODE_SLEEP);
+
+	return sysfs_emit(buf, "%#02x\n", power_mode);
+}
+
 static DEVICE_ATTR_RO(serial_number);
 static DEVICE_ATTR_RO(panel_extinfo);
 static DEVICE_ATTR_RO(panel_name);
@@ -2263,6 +2292,7 @@ static DEVICE_ATTR_RO(error_count_unknown);
 static DEVICE_ATTR_RO(panel_pwr_vreg);
 static DEVICE_ATTR_RO(time_in_state);
 static DEVICE_ATTR_RO(available_disp_stats);
+static DEVICE_ATTR_RO(power_mode);
 
 static const struct attribute *panel_attrs[] = {
 	&dev_attr_serial_number.attr,
@@ -2287,6 +2317,7 @@ static const struct attribute *panel_attrs[] = {
 	&dev_attr_panel_pwr_vreg.attr,
 	&dev_attr_time_in_state.attr,
 	&dev_attr_available_disp_stats.attr,
+	&dev_attr_power_mode.attr,
 	NULL
 };
 
