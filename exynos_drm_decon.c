@@ -2097,7 +2097,7 @@ static int decon_parse_dt(struct decon_device *decon, struct device_node *np)
 	struct property *prop;
 	const __be32 *cur;
 	u32 val;
-	int ret = 0, i;
+	int ret = 0, i, count;
 	int dpp_id;
 	u32 dfs_lv_cnt, dfs_lv_khz[BTS_DFS_MAX] = {400000, 0, };
 	bool err_flag = false;
@@ -2271,6 +2271,31 @@ static int decon_parse_dt(struct decon_device *decon, struct device_node *np)
 			(decon->bts_scen.skip_with_video) ? "yes" : "no");
 	} else {
 		decon_info(decon, "not support to set dpu bts scenario under certain condition.\n");
+	}
+
+
+	count = of_property_count_u32_elems(np, "bw_lat_rd_map");
+	if (count > 0 && !(count % 2)) {
+		u32 map_cnt;
+		struct bw_latency_map *tbl;
+
+		map_cnt = count / 2;
+		tbl = devm_kcalloc(decon->dev, map_cnt,
+				sizeof(struct bw_latency_map), GFP_KERNEL);
+		if (tbl) {
+			if (!of_property_read_u32_array(np, "bw_lat_rd_map",
+					(u32 *)tbl,
+					(size_t)count)) {
+				decon_info(decon, "support set urgent latency at runtime\n");
+				for (i = 0; i < map_cnt; i++) {
+					decon_info(decon, "[%d] %8u kbps %4u ns\n",
+						i, tbl[i].bw_kbps, tbl[i].latency_ns);
+				}
+				decon->bts_urgent_rd_lat.bw_lat_map_cnt = map_cnt;
+				decon->bts_urgent_rd_lat.bw_lat_tbl = tbl;
+				decon->bts_urgent_rd_lat.enabled = true;
+			}
+		}
 	}
 
 	if (of_property_read_u32(np, "dfs_lv_cnt", &dfs_lv_cnt)) {
