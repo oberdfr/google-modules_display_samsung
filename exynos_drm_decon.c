@@ -726,7 +726,7 @@ static int decon_atomic_check(struct exynos_drm_crtc *exynos_crtc,
 
 #if IS_ENABLED(CONFIG_GS_DRM_PANEL_UNIFIED)
 /**
- * Calculates ROI components based on screen size parameters
+ * decon_calc_hist_roi() - Calculates ROI components based on screen size parameters
  * @w: width of screen, in pixels
  * @h: height of screen, in pixels
  * @d: depth of ROI center point, in pixels
