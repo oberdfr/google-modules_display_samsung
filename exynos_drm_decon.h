@@ -475,6 +475,7 @@ struct decon_debug {
 	u32 auto_refresh_frames;
 
 	u32 te_cnt;
+	u32 framedone_cnt;
 	bool force_te_on;
 	bool tout_en;
 };

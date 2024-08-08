@@ -2011,6 +2011,7 @@ static irqreturn_t decon_irq_handler(int irq, void *dev_data)
 		DPU_ATRACE_INT_PID("frame_transfer", 0, decon->thread->pid);
 		atomic_set(&decon->frame_transfer_pending, 0);
 		DPU_EVENT_LOG(DPU_EVT_DECON_FRAMEDONE, decon->id, decon);
+		decon->d.framedone_cnt++;
 		exynos_dqe_save_lpd_data(decon->dqe);
 		atomic_dec_if_positive(&decon->frames_pending);
 		if (decon->dqe)
