@@ -2270,6 +2270,19 @@ static ssize_t power_mode_show(struct device *dev, struct device_attribute *attr
 	return sysfs_emit(buf, "%#02x\n", power_mode);
 }
 
+static ssize_t power_state_show(struct device *dev, struct device_attribute *attr, char *buf)
+{
+	struct backlight_device *bl = to_backlight_device(dev);
+	struct exynos_panel *ctx = bl_get_data(bl);
+	enum display_state state;
+
+	mutex_lock(&ctx->bl_state_lock);
+	state = get_current_display_state_locked(ctx);
+	mutex_unlock(&ctx->bl_state_lock);
+
+	return sysfs_emit(buf, "%s\n", disp_state_str[state]);
+}
+
 static DEVICE_ATTR_RO(serial_number);
 static DEVICE_ATTR_RO(panel_extinfo);
 static DEVICE_ATTR_RO(panel_name);
@@ -2293,6 +2306,7 @@ static DEVICE_ATTR_RO(panel_pwr_vreg);
 static DEVICE_ATTR_RO(time_in_state);
 static DEVICE_ATTR_RO(available_disp_stats);
 static DEVICE_ATTR_RO(power_mode);
+static DEVICE_ATTR_RO(power_state);
 
 static const struct attribute *panel_attrs[] = {
 	&dev_attr_serial_number.attr,
@@ -2318,6 +2332,7 @@ static const struct attribute *panel_attrs[] = {
 	&dev_attr_time_in_state.attr,
 	&dev_attr_available_disp_stats.attr,
 	&dev_attr_power_mode.attr,
+	&dev_attr_power_state.attr,
 	NULL
 };
 
@@ -5579,6 +5594,7 @@ static void notify_panel_mode_changed_worker(struct work_struct *work)
 		container_of(work, struct notify_state_change, work);
 	struct exynos_panel *ctx =
 		container_of(notify_state_change, struct exynos_panel, notify_panel_mode_changed);
+	enum display_state power_state;
 
 	disp_stats_update_state(ctx);
 
@@ -5590,6 +5606,16 @@ static void notify_panel_mode_changed_worker(struct work_struct *work)
 	}
 
 	sysfs_notify(&ctx->bl->dev.kobj, NULL, "state");
+
+	mutex_lock(&ctx->bl_state_lock);
+	power_state = get_current_display_state_locked(ctx);
+	mutex_unlock(&ctx->bl_state_lock);
+
+	/* Avoid spurious notifications */
+	if (power_state != ctx->notified_power_state) {
+		sysfs_notify(&ctx->dev->kobj, NULL, "power_state");
+		ctx->notified_power_state = power_state;
+	}
 }
 
 static void notify_brightness_changed_worker(struct work_struct *work)
@@ -5733,6 +5759,7 @@ int exynos_panel_common_init(struct mipi_dsi_device *dsi,
 	ctx->panel_idle_enabled = exynos_panel_func && exynos_panel_func->set_self_refresh != NULL;
 	INIT_DELAYED_WORK(&ctx->idle_work, panel_idle_work);
 
+	ctx->notified_power_state = DISPLAY_STATE_MAX;
 	INIT_WORK(&ctx->notify_panel_mode_changed.work, notify_panel_mode_changed_worker);
 	INIT_WORK(&ctx->notify_brightness_changed_work, notify_brightness_changed_worker);
 
