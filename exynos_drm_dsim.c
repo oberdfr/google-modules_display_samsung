@@ -173,13 +173,20 @@ static struct drm_crtc *drm_encoder_get_old_crtc(struct drm_encoder *encoder,
 	return conn_state->crtc;
 }
 
-static void dsim_dump(struct dsim_device *dsim)
+void dsim_dump(struct dsim_device *dsim, struct drm_printer *p)
 {
 	struct dsim_regs regs;
-	struct drm_printer p = is_console_enabled() ?
-		drm_debug_printer("[drm]") : drm_info_printer(dsim->dev);
+	struct drm_printer printer, *pointer;
 
-	drm_printf(&p, "%s[%d]: === DSIM SFR DUMP ===\n",
+	if (!p) {
+		printer = is_console_enabled() ?
+			drm_debug_printer("[drm]") : drm_info_printer(dsim->dev);
+			pointer = &printer;
+	} else {
+		pointer = p;
+	}
+
+	drm_printf(pointer, "%s[%d]: === DSIM SFR DUMP ===\n",
 		dsim->dev->driver->name, dsim->id);
 
 	if (dsim->state != DSIM_STATE_HSCLKEN)
@@ -189,7 +196,7 @@ static void dsim_dump(struct dsim_device *dsim)
 	regs.ss_regs = dsim->res.ss_reg_base;
 	regs.phy_regs = dsim->res.phy_regs;
 	regs.phy_regs_ex = dsim->res.phy_regs_ex;
-	__dsim_dump(&p, dsim->id, &regs);
+	__dsim_dump(pointer, dsim->id, &regs);
 }
 
 static int dsim_phy_power_on(struct dsim_device *dsim)
@@ -335,7 +342,7 @@ static void _dsim_enable(struct dsim_device *dsim)
 
 #if defined(DSIM_BIST)
 	dsim_reg_set_bist(dsim->id, true, DSIM_GRAY_GRADATION);
-	dsim_dump(dsim);
+	dsim_dump(dsim, NULL);
 #endif
 
 	if (decon)
@@ -448,7 +455,7 @@ static void __dsim_check_pend_cmd_locked(struct dsim_device *dsim)
 	WARN_ON(!mutex_is_locked(&dsim->cmd_lock));
 
 	if (WARN_ON(dsim_reg_has_pend_cmd(dsim->id)))
-		dsim_dump(dsim);
+		dsim_dump(dsim, NULL);
 
 	if (WARN(dsim_cmd_packetgo_is_enabled(dsim), "pending packets remaining ph(%u) pl(%u)\n",
 		 dsim->total_pend_ph, dsim->total_pend_pl))
@@ -2306,7 +2313,7 @@ static int dsim_wait_for_cmd_fifo_empty(struct dsim_device *dsim, bool is_long)
 
 	if (ret) {
 		dsim_warn(dsim, "failed on wait for cmd fifo empty (%d)\n", ret);
-		dsim_dump(dsim);
+		dsim_dump(dsim, NULL);
 	}
 
 	DPU_ATRACE_END(__func__);
@@ -2652,7 +2659,7 @@ dsim_read_data(struct dsim_device *dsim, const struct mipi_dsi_msg *msg)
 	case MIPI_DSI_RX_ACKNOWLEDGE_AND_ERROR_REPORT:
 		ret = dsim_reg_rx_err_handler(dsim->id, rx_fifo);
 		if (ret < 0) {
-			dsim_dump(dsim);
+			dsim_dump(dsim, NULL);
 			return ret;
 		}
 		break;
@@ -2688,7 +2695,7 @@ dsim_read_data(struct dsim_device *dsim, const struct mipi_dsi_msg *msg)
 		break;
 	default:
 		dsim_err(dsim, "packet format is invalid.\n");
-		dsim_dump(dsim);
+		dsim_dump(dsim, NULL);
 		return -EBUSY;
 	}
 
@@ -2697,7 +2704,7 @@ dsim_read_data(struct dsim_device *dsim, const struct mipi_dsi_msg *msg)
 
 		dsim_warn(dsim, "RX FIFO is not empty: rx_size:%u, rx_len:%lu\n",
 			rx_size, msg->rx_len);
-		dsim_dump(dsim);
+		dsim_dump(dsim, NULL);
 		do {
 			rx_fifo = dsim_reg_get_rx_fifo(dsim->id);
 			dsim_info(dsim, "rx fifo:0x%8x, response:0x%x\n",

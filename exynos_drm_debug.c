@@ -999,11 +999,21 @@ static const struct file_operations dpu_event_fops = {
 static int dpu_debug_reg_dump_show(struct seq_file *s, void *unused)
 {
 	struct decon_device *decon = s->private;
+	struct dsim_device *dsim;
 	struct drm_printer p = drm_seq_file_printer(s);
 
 	if (decon->state == DECON_STATE_ON &&
 		pm_runtime_get_if_in_use(decon->dev) == 1) {
 		decon_dump(decon, &p);
+		dsim = decon_get_dsim(decon);
+		if (dsim) {
+			dsim_dump(dsim, &p);
+			if (dsim->dual_dsi == DSIM_DUAL_DSI_MAIN) {
+				dsim = exynos_get_dual_dsi(DSIM_DUAL_DSI_SEC);
+				if (dsim)
+					dsim_dump(dsim, &p);
+			}
+		}
 		pm_runtime_put(decon->dev);
 	} else {
 		drm_printf(&p, "%s[%u]: DECON disabled(%d)\n",

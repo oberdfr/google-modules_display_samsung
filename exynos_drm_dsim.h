@@ -205,6 +205,8 @@ dsim_get_decon(const struct dsim_device *dsim)
 	return to_exynos_crtc(crtc)->ctx;
 }
 
+void dsim_dump(struct dsim_device *dsim, struct drm_printer *p);
+
 inline void dsim_trace_msleep(u32 delay_ms);
 
 #ifdef CONFIG_DEBUG_FS
