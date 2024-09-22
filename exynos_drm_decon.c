@@ -1012,7 +1012,6 @@ static void decon_arm_event_locked(struct exynos_drm_crtc *exynos_crtc)
 	decon->event = event;
 }
 
-#define VSYNC_PERIOD_VARIANCE_NS		2000000
 static void decon_wait_earliest_process_time(
 		const struct exynos_drm_crtc_state *old_exynos_crtc_state,
 		const struct exynos_drm_crtc_state *new_exynos_crtc_state)
@@ -1020,7 +1019,7 @@ static void decon_wait_earliest_process_time(
 	const struct drm_crtc_state *old_crtc_state = &old_exynos_crtc_state->base;
 	const struct drm_crtc_state *new_crtc_state = &new_exynos_crtc_state->base;
 	int32_t te_freq, vsync_period_ns;
-	ktime_t earliest_process_time, now;
+	ktime_t earliest_process_time, expected_process_duration_ns, now;
 
 	te_freq = exynos_drm_mode_te_freq(&old_crtc_state->mode);
 	if (te_freq == 0) {
@@ -1028,20 +1027,23 @@ static void decon_wait_earliest_process_time(
 		te_freq = exynos_drm_mode_te_freq(&new_crtc_state->mode);
 	}
 	vsync_period_ns = mult_frac(1000, 1000 * 1000, te_freq);
+	/* set 1/4 of vsync period as variance */
+	expected_process_duration_ns = mult_frac(vsync_period_ns, 3, 4);
 	if (ktime_compare(new_exynos_crtc_state->expected_present_time,
-				vsync_period_ns - VSYNC_PERIOD_VARIANCE_NS) <= 0) {
+			  expected_process_duration_ns) <= 0) {
 		return;
 	}
 
 	earliest_process_time = ktime_sub_ns(new_exynos_crtc_state->expected_present_time,
-					vsync_period_ns - VSYNC_PERIOD_VARIANCE_NS);
+					     expected_process_duration_ns);
 	now = ktime_get();
 
 	if (ktime_after(earliest_process_time, now)) {
 		int32_t max_delay_us = (10 * vsync_period_ns) / 1000;
-		int32_t delay_until_process;
+		int32_t delay_until_process, diff;
+		const int32_t WARNING_THRESHOLD_US = 1000;
 
-		DPU_ATRACE_BEGIN("wait for earliest present time");
+		DPU_ATRACE_BEGIN("wait for earliest present time (vsync:%d)", te_freq);
 
 		delay_until_process = (int32_t)ktime_us_delta(earliest_process_time, now);
 		if (delay_until_process > max_delay_us) {
@@ -1050,8 +1052,19 @@ static void decon_wait_earliest_process_time(
 					now, earliest_process_time);
 		}
 		usleep_range(delay_until_process, delay_until_process + 10);
-
 		DPU_ATRACE_END("wait for earliest process time");
+
+		diff = abs(ktime_to_us(ktime_sub(ktime_get(), now)));
+		if (diff > WARNING_THRESHOLD_US) {
+			char trace_str[64];
+			static uint64_t failure_times = 0;
+
+			scnprintf(trace_str, sizeof(trace_str),
+				 "waiting for expected present time: %d(%d)us failure:%llu\n",
+				 delay_until_process, diff, ++failure_times);
+			pr_warn("%s", trace_str);
+			DPU_ATRACE_INSTANT(trace_str);
+		}
 	}
 }
 
