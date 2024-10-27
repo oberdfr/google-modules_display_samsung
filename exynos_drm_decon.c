@@ -58,6 +58,7 @@
 #endif
 
 struct decon_device *decon_drvdata[MAX_DECON_CNT];
+EXPORT_SYMBOL(decon_drvdata);
 
 #define decon_info(decon, fmt, ...)	\
 pr_info("%s[%u]: "fmt, decon->dev->driver->name, decon->id, ##__VA_ARGS__)

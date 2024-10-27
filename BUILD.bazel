@@ -4,14 +4,16 @@ load("//build/kernel/kleaf:kernel.bzl", "kernel_module")
 
 filegroup(
     name = "headers",
-    srcs = [
+    srcs = glob([
+        "*.h",
+        "cal_common/*.h",
+    ]) + [
         "dp_audio/dp_audio.h",
-        "exynos_drm_connector.h",
-        "exynos_drm_format.h",
         "panel/panel-common.h",
         "panel/panel-samsung-drv.h",
         "//private/google-modules/display/common:headers",
         "//private/google-modules/display/samsung/include:headers",
+        "//private/google-modules/bms/misc:headers",
     ],
     visibility = [
         "//private/devices/google:__subpackages__",
