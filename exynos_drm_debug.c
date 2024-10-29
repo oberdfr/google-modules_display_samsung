@@ -304,6 +304,8 @@ void DPU_EVENT_LOG(enum dpu_event_type type, int index, void *priv)
 		log->data.bts_update.prev_rt_avg_bw = decon->bts.prev_rt_avg_bw;
 		log->data.bts_update.total_bw = decon->bts.total_bw;
 		log->data.bts_update.prev_total_bw = decon->bts.prev_total_bw;
+		log->data.bts_update.urgent_rd_lat = decon->bts.urgent_rd_lat;
+		log->data.bts_update.prev_urgent_rd_lat = decon->bts.prev_urgent_rd_lat;
 		if (decon->bts_scen.enabled && decon->bts_scen.voted)
 			log->data.bts_update.dpu_scen_idx = decon->bts_scen.idx;
 		else
@@ -517,14 +519,15 @@ static void dpu_print_log_rsc(char *buf, int len, u32 decon_id, struct dpu_log_r
 	sprintf(buf + len, "\t%s\t%s", str_chs, str_wins);
 }
 
-#define LOG_BUF_SIZE	160
+#define LOG_BUF_SIZE	176
 static int dpu_print_log_bts_update(char *buf, int len, struct dpu_log_bts_update *update)
 {
 	return scnprintf(buf + len, LOG_BUF_SIZE - len,
-			"\tmif(%lu) int(%lu) disp(%lu) peak(%u,%u) rt(%u,%u) total(%u,%u) scen(%u)",
-			update->freqs.mif_freq, update->freqs.int_freq, update->freqs.disp_freq,
-			update->prev_peak, update->peak, update->prev_rt_avg_bw, update->rt_avg_bw,
-			update->prev_total_bw, update->total_bw, update->dpu_scen_idx);
+		"\tmif(%lu) int(%lu) disp(%lu) peak(%u,%u) rt(%u,%u) total(%u,%u) rd(%u,%u) scen(%u)",
+		update->freqs.mif_freq, update->freqs.int_freq, update->freqs.disp_freq,
+		update->prev_peak, update->peak, update->prev_rt_avg_bw, update->rt_avg_bw,
+		update->prev_total_bw, update->total_bw,
+		update->prev_urgent_rd_lat, update->urgent_rd_lat, update->dpu_scen_idx);
 }
 
 static int dpu_print_log_partial(char *buf, int len, struct dpu_log_partial *p)
